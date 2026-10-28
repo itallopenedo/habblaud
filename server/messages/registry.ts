@@ -46,6 +46,7 @@ export const ERR_NOT_CONFIRMED = tr('a sessão não confirmou a entrega');
 export const ERR_GONE = tr('o agente saiu do escritório');
 export const ERR_REFUSED = tr('a sessão não aceitou a mensagem');
 export const ERR_SESSION_CHANGED = tr('a conversa do agente mudou (/clear ou /resume) antes da entrega');
+const ERR_DESKTOP_CHANGED = tr('a pergunta mudou ou a opção não está mais disponível: atualize o escritório');
 export const ERR_CODEX_UNAVAILABLE =
   tr('não há como entregar ao Codex agora: rode o Habblaud fora do Docker com o `codex` no PATH (ou HABBLAUD_CODEX_BIN) ou, no Docker, deixe o npm run codex:bridge rodando no Mac');
 export const ERR_CODEX_NOT_FETCHED = tr('o auxiliar do Codex não buscou a mensagem: o npm run codex:bridge está rodando no Mac?');
@@ -76,6 +77,8 @@ export interface CodexDeliveryOptions {
 
 export interface MessageRegistryOptions {
   office: OfficeLike;
+  /** Resolve uma escolha atual do Claude Desktop para a mensagem original da ação. */
+  desktopAnswer?: (agentId: string, questionId: string, option: number) => string | undefined;
   /** Agente do demo (Office.demoAgent): esses só existem no snapshot. */
   demoAgent?: (id: string) => AgentInfo | undefined;
   /** Entrega fictícia a um agente do demo (Office.deliverDemoMessage); false = ele já saiu. */
@@ -116,6 +119,8 @@ interface Entry {
   activity: ReturnType<typeof describeMessage>;
   /** Sessão do agente quando a mensagem foi mandada: só ela recebe (troca de conversa = falha). */
   target: string;
+  questionId?: string;
+  option?: number;
   /** Sessão que buscou a mensagem (sent): só ela confirma a entrega. */
   session?: string;
   sentAt?: number;
@@ -157,9 +162,14 @@ function unavailableReason(a: AgentInfo, reachable: boolean): string | undefined
 }
 
 /** Corpo de POST /api/messages: `{agentId, text}`. O texto não é alterado (nem aparado). */
-export function parseSend(raw: unknown): { agentId: string; text: string } {
+export function parseSend(raw: unknown): { agentId: string; text: string } | { agentId: string; questionId: string; option: number } {
   const r = rec(raw);
   const agentId = shortStr(r?.agentId, ID_MAX);
+  if (r && agentId && ('questionId' in r || 'option' in r)) {
+    const questionId = shortStr(r.questionId, ID_MAX);
+    if (!questionId || !Number.isInteger(r.option) || (r.option as number) < 0 || (r.option as number) >= 6 || 'text' in r) throw new InvalidRequest('esperado {agentId, questionId, option}');
+    return { agentId, questionId, option: r.option as number };
+  }
   if (!r || !agentId || typeof r.text !== 'string') throw new InvalidRequest('esperado {agentId, text}');
   if (!r.text.trim()) throw new InvalidRequest(tr('a mensagem está vazia'));
   if (r.text.length > MAX_TEXT) throw new InvalidRequest(tr('a mensagem passa de 20.000 caracteres'));
@@ -257,13 +267,21 @@ export class MessageRegistry {
    * (too-many). Corpo inválido: lança InvalidRequest.
    */
   send(raw: unknown): SendResult {
-    const { agentId, text } = parseSend(raw);
+    const input = parseSend(raw);
+    const { agentId } = input;
     const real = this.opts.office.get(agentId);
     const demo = real ? undefined : this.opts.demoAgent?.(agentId);
     const agent = real ?? demo;
     if (!agent) return { error: 'not-found' };
     const reason = unavailableReason(agent, real ? this.canMessage(agentId) : demo!.canMessage === true);
     if (reason) return { error: 'unavailable', reason };
+
+    const questionId = 'questionId' in input ? input.questionId : undefined;
+    const text = 'text' in input ? input.text : this.opts.desktopAnswer?.(agentId, input.questionId, input.option);
+    if (text === undefined) return { error: 'unavailable', reason: ERR_DESKTOP_CHANGED };
+    if (questionId && [...this.messages.values()].some((e) => e.msg.agentId === agentId && e.questionId === questionId && (e.msg.status !== 'failed' || e.late))) {
+      return { error: 'unavailable', reason: tr('esta resposta já foi enviada: aguarde a sessão receber') };
+    }
     let open = 0;
     for (const e of this.messages.values()) if (e.msg.agentId === agentId && !isFinal(e)) open++;
     if (open >= MAX_OPEN) return { error: 'too-many' };
@@ -271,6 +289,10 @@ export class MessageRegistry {
     const now = this.now();
     const id = `m-${now.toString(36)}-${++this.seq}-${randomBytes(9).toString('base64url')}`;
     const entry: Entry = { msg: { id, agentId, status: 'queued', createdAt: now, updatedAt: now }, text, activity: describeMessage(text), target: agent.sessionId };
+    if ('questionId' in input) {
+      entry.questionId = input.questionId;
+      entry.option = input.option;
+    }
     if (demo) entry.demo = true;
     else if (real?.provider === 'codex') entry.codex = true;
     this.messages.set(id, entry);
@@ -310,6 +332,10 @@ export class MessageRegistry {
     for (const e of this.messages.values()) {
       if (out.length >= INBOX_BATCH) break;
       if (e.demo || e.codex || e.msg.agentId !== agent.id || e.msg.status !== 'queued' || e.target !== session) continue;
+      if (e.questionId && this.opts.desktopAnswer?.(agent.id, e.questionId, e.option!) !== e.text) {
+        this.fail(e, now, ERR_DESKTOP_CHANGED);
+        continue;
+      }
       this.setStatus(e, 'sent', now);
       e.session = session;
       e.sentAt = now;

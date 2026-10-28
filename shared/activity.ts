@@ -732,6 +732,11 @@ export function describeTool(name: string, rawInput: unknown): ActivityDescripti
       return make('communicate', '👥', tr('Conferindo a equipe'));
     case 'SendMessage':
       return make('communicate', '💬', tr('Mensagem para {0}', [str(input.to) || tr('outro agente')]), str(input.message));
+    case 'mcp__ccd_turn__wrap_up': {
+      if (!str(input.ask).trim()) return describeMcp(name, input);
+      const questions = askQuestions([{ question: input.ask, options: input.actions }]);
+      return { ...make('ask', '❓', tr('Fazendo uma pergunta a você'), str(input.ask)), questions };
+    }
     case 'AskUserQuestion': {
       const qs = Array.isArray(input.questions) ? (input.questions as Array<Record<string, unknown>>) : [];
       const questions = askQuestions(qs);

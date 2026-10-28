@@ -131,6 +131,8 @@ export interface TranscriptState {
   ended: boolean;
   /** Ferramentas chamadas que ainda não tiveram resultado. */
   pendingTools: Map<string, string>;
+  /** A caixa do Claude Desktop responde à ferramenta imediatamente, mas ainda espera o usuário. */
+  desktopQuestion?: { toolUseId: string; activityId?: string; actions: Map<number, string> };
   /** Nomes das ferramentas por tool_use id (para erros e resultados de subagentes). */
   toolNames: Map<string, string>;
   /** TaskStop/KillShell: tool_use id -> id da tarefa parada. */
@@ -263,6 +265,7 @@ export function backgroundIdOf(tur: Record<string, unknown>, content: unknown, t
 
 const INTERRUPTED = /^\[Request interrupted by user/;
 const REJECTED = /doesn't want to proceed|tool use was rejected|user rejected/i;
+const REMINDER = /<system-reminder>[\s\S]*?(?:<\/system-reminder>|$)/g;
 // Mensagens "de sistema" gravadas como user (comandos locais, lembretes, saída de bash...).
 const SYSTEM_TAG = /^<(local-command-[\w-]+|command-stdout|command-stderr|system-reminder|bash-[\w-]+|user-memory-input|user-prompt-submit-hook|persisted-output)\b/;
 // Comandos de barra que não são instruções de trabalho.
@@ -299,7 +302,7 @@ class LineParser {
     if (opts.tool) activity.tool = opts.tool;
     if (opts.durationMs !== undefined) activity.durationMs = opts.durationMs;
     if (desc.kind === 'error') activity.error = true;
-    const current = opts.current ?? true;
+    const current = (opts.current ?? true) && (!this.s.desktopQuestion || desc.kind === 'ask');
     this.out.activities.push(opts.toolUseId ? { activity, current, toolUseId: opts.toolUseId } : { activity, current });
     if (current) this.s.current = { id: activity.id, toolUseId: opts.toolUseId, kind: desc.kind, at: this.at, msgId: opts.msgId };
   }
@@ -456,10 +459,19 @@ class LineParser {
     const input = (b.input && typeof b.input === 'object' ? b.input : {}) as Record<string, unknown>;
     s.stats.toolCalls++;
     s.ended = false;
+    const desc = describeTool(name, input);
+    if (name === 'mcp__ccd_turn__wrap_up') {
+      const actions = new Map<number, string>();
+      if (Array.isArray(input.actions)) input.actions.slice(0, 6).forEach((a, i) => {
+        if (a && typeof a === 'object' && str(a.label) && typeof a.message === 'string' && a.message.trim() && a.message.length <= 20_000) actions.set(i, a.message);
+      });
+      s.desktopQuestion = desc.kind === 'ask' ? { toolUseId: id, actions } : undefined;
+    }
     remember(s.toolNames, id, name);
     remember(s.pendingTools, id, name, 128);
     this.changed();
-    this.push(describeTool(name, input), { suffix, tool: name, toolUseId: id, msgId });
+    this.push(desc, { suffix, tool: name, toolUseId: id, msgId });
+    if (s.desktopQuestion?.toolUseId === id) s.desktopQuestion.activityId = s.current?.id;
     const gh = githubCallOf(name, input);
     if (gh) remember(s.github, id, gh, 64);
 
@@ -559,6 +571,7 @@ class LineParser {
   }
 
   private interrupted(): void {
+    this.s.desktopQuestion = undefined;
     this.s.ended = true;
     this.s.pendingTools.clear();
     this.out.signals.push({ type: 'turnEnd' });
@@ -566,7 +579,7 @@ class LineParser {
   }
 
   private userText(raw: string): void {
-    const text = raw.trimStart();
+    const text = raw.replace(REMINDER, '').trimStart();
     if (!text) return;
     if (text.startsWith('<task-notification>')) return this.notification(text, true);
     if (INTERRUPTED.test(text)) return this.interrupted();
@@ -579,6 +592,7 @@ class LineParser {
       prompt = `${cmd} ${args}`.trim();
     }
     this.s.ended = false;
+    this.s.desktopQuestion = undefined;
     this.meta('lastPrompt', truncate(maskSecrets(prompt.slice(0, 1_000)), 200));
     this.push(describePrompt(prompt));
   }
@@ -608,6 +622,7 @@ class LineParser {
     const name = s.toolNames.get(id);
     s.pendingTools.delete(id);
     const isError = b.is_error === true;
+    if (isError && s.desktopQuestion?.toolUseId === id) s.desktopQuestion = undefined;
     const tur = (this.j.toolUseResult && typeof this.j.toolUseResult === 'object' ? this.j.toolUseResult : {}) as Record<string, unknown>;
 
     if (isError && !interrupted) {

@@ -182,6 +182,10 @@ export class MessageComposer {
 
   // ---------------------------------------------------------------- internos
 
+  answerDesktopQuestion(agentId: string, questionId: string, option: number): void {
+    if (agentId === this.agentId) void this.send({ questionId, option });
+  }
+
   private onKey(e: KeyboardEvent): void {
     // Os atalhos globais (F, T, P, /, setas...) não valem dentro da caixa. Com Ctrl/⌘ a tecla segue adiante
     // (Ctrl/⌘+F busca na conversa do terminal; os atalhos globais ignoram essas combinações).
@@ -245,15 +249,15 @@ export class MessageComposer {
     this.ctx.invalidate();
   }
 
-  private async send(): Promise<void> {
+  private async send(choice?: { questionId: string; option: number }): Promise<void> {
     const agentId = this.agentId;
     const raw = this.box.value;
-    if (this.mode.kind !== 'ready' || !canSend(raw) || this.states.get(agentId)?.phase === 'sending') return;
+    if (this.mode.kind !== 'ready' || (!choice && !canSend(raw)) || this.states.get(agentId)?.phase === 'sending') return;
     this.providers.set(agentId, this.provider);
     this.setState(agentId, { phase: 'sending', at: Date.now() });
     let r: { message: OutboxMessage } | { error: string };
     try {
-      r = await this.ctx.store.sendMessage(agentId, messageText(raw));
+      r = await this.ctx.store.sendMessage(agentId, choice ? '' : messageText(raw), choice);
     } catch {
       r = { error: OFFLINE_ERROR };
     }
@@ -263,7 +267,7 @@ export class MessageComposer {
       return;
     }
     // Na fila: a caixa esvazia (a não ser que você tenha continuado a escrever enquanto o envio ia).
-    if ((this.drafts.get(agentId) ?? '') === raw) {
+    if (!choice && (this.drafts.get(agentId) ?? '') === raw) {
       this.drafts.delete(agentId);
       if (this.agentId === agentId && this.box.value === raw) {
         this.box.value = '';
