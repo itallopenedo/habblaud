@@ -10,6 +10,18 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+### Corrigido
+
+- **Perguntas do Claude Desktop aparecem como pendentes.** A caixa de próximos passos (`ccd_turn.wrap_up`) passa a
+  mostrar a pergunta e as opções e a contar em “precisam de você”, mesmo após o fim do turno. A pendência termina
+  com uma nova instrução, interrupção, erro ou substituição da caixa. As opções podem ser respondidas pelo escritório
+  usando o plugin de mensagens, inclusive pelo celular com acesso a mensagens. O servidor valida a pergunta atual e
+  entrega a mensagem original da ação, impedindo escolhas antigas e cliques repetidos.
+  Respostas acompanhadas de lembretes internos também encerram a pendência, sem deixar perguntas antigas no painel.
+
+- **Avisos no iPhone:** auxiliar local opcional `scripts/phone-notify.mjs` envia alertas genéricos pelo ntfy quando
+  surgem agentes esperando resposta, com deduplicação persistente e nova tentativa após falhas de rede.
+
 ## [1.0.3] - 2026-10-16
 
 ### Corrigido

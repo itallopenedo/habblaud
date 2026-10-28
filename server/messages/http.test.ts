@@ -212,6 +212,19 @@ describe('rotas', () => {
     expect((await post(srv, '/api/mod/inbox/ack', { session: 'nao-existe', results: [{ id: 'x', ok: true }] })).json).toEqual({ ok: true });
   });
 
+  it('escolha do Claude Desktop: POST valida, entrega o texto original e confirma pelo plugin', async () => {
+    srv = await serveMessages({ registry: { desktopAnswer: (_a, q, o) => q === 'q1' && o === 1 ? 'Revise o diff; não faça merge ainda.' : undefined } });
+    await post(srv, '/api/mod/inbox', { session: SESSION });
+    const body = { agentId: MAIN, questionId: 'q1', option: 1 };
+    const created = await post(srv, '/api/messages', body);
+    expect(created.status).toBe(201);
+    const id = (created.json as OutboxMessage).id;
+    expect((await post(srv, '/api/messages', body)).status).toBe(409);
+    expect((await post(srv, '/api/mod/inbox', { session: SESSION })).json).toEqual({ messages: [{ id, text: 'Revise o diff; não faça merge ainda.' }] });
+    await post(srv, '/api/mod/inbox/ack', { session: SESSION, results: [{ id, ok: true }] });
+    expect((await request(srv.base, `/api/messages/${id}`)).json).toMatchObject({ status: 'delivered' });
+  });
+
   it('fluxo: plugin conecta (canMessage) → página manda (201) → plugin busca → confirma → página consulta (delivered) e o feed mostra', async () => {
     srv = await serveMessages();
     expect((await snapshot(srv)).agents.find((a) => a.id === MAIN)?.canMessage).toBeUndefined();

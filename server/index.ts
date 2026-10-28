@@ -268,6 +268,7 @@ const dictation = config.messages
 const messages = config.messages
   ? new MessageRegistry({
       office,
+      desktopAnswer: (agentId, questionId, option) => claude.desktopAnswer(agentId, questionId, option),
       demoAgent: (id) => office.demoAgent(id),
       demoDeliver: (id, text) => office.deliverDemoMessage(id, text),
       codex: {

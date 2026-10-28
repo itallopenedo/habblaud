@@ -2234,6 +2234,13 @@
   font-weight: 600;
 }
 
+.ui-ask__opts .ui-btn {
+  min-height: 44px;
+  margin: 3px 0;
+  white-space: normal;
+  text-align: left;
+}
+
 .ui-ask__desc {
   display: block;
   opacity: 0.8;

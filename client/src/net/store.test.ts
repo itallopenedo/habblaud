@@ -34,6 +34,16 @@ class FakeSource implements EventSourceLike {
   }
 }
 
+describe('OfficeStore: escolha do Claude Desktop', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('manda só a referência da pergunta e da opção; o servidor resolve a mensagem original', async () => {
+    const fetcher = vi.fn(async (_url: string, _options: RequestInit) => new Response(JSON.stringify({ id: 'm1', status: 'queued' }), { status: 201 }));
+    vi.stubGlobal('fetch', fetcher);
+    await new OfficeStore().sendMessage('a1', '', { questionId: 'q1', option: 1 });
+    expect(JSON.parse(fetcher.mock.calls[0][1].body as string)).toEqual({ agentId: 'a1', questionId: 'q1', option: 1 });
+  });
+});
+
 describe('mockOptionsFrom', () => {
   it('usa os padrões sem parâmetros', () => {
     expect(mockOptionsFrom('')).toEqual({ speed: 1, sessions: 4 });

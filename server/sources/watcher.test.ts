@@ -406,6 +406,111 @@ describe('ClaudeWatcher', () => {
     expect(c.agent(id)!.activity).toMatchObject({ kind: 'ask', text: 'Fazendo uma pergunta a você' });
   });
 
+  it('Claude Desktop: a escolha continua pendente após wrap_up e fim do turno até uma nova instrução', () => {
+    const id = bootWithSession();
+    appendLines(c.transcript('sess-a'), [
+      L.assistant([L.tool('desktop-q', 'mcp__ccd_turn__wrap_up', {
+        ask: 'Qual caminho seguir?', actions: [{ label: 'Revisar', message: 'Revise antes de continuar' }, { label: 'Manter', message: 'Mantenha como está' }],
+      })], { stop: 'tool_use' }),
+      L.result('desktop-q', 'Shown in the next-step box.'),
+      L.assistant([L.text('Aguardando sua escolha.')], { stop: 'end_turn' }),
+      L.system('turn_duration', { durationMs: 1000 }),
+    ]);
+    c.openSession(100, 'sess-a', { status: 'idle' });
+    c.poll();
+    expect(c.agent(id)).toMatchObject({ status: 'waiting', activity: { kind: 'ask', detail: 'Qual caminho seguir?', questions: [{ options: [{ label: 'Revisar' }, { label: 'Manter' }] }] } });
+    expect(c.agent(id)!.permission).toBeUndefined();
+    const questionId = c.agent(id)!.activity!.id;
+    expect(c.watcher.desktopAnswer(id, questionId, 0)).toBe('Revise antes de continuar');
+    expect(c.watcher.desktopAnswer(id, 'pergunta-antiga', 0)).toBeUndefined();
+    expect(c.watcher.desktopAnswer(id, questionId, 6)).toBeUndefined();
+    expect(c.watcher.desktopAnswer('outro-agente', questionId, 0)).toBeUndefined();
+    appendLines(c.transcript('sess-a'), [
+      L.meta('Contexto interno'), L.notification('other-tool', 'completed', 'Terminou'),
+      L.assistant([L.tool('background-read', 'Read', { file_path: '/projetos/loja/status.txt' })]),
+      L.result('background-read', 'ok'), L.assistant([L.text('Atualização em segundo plano.')], { stop: 'end_turn' }),
+    ]);
+    c.poll();
+    expect(c.agent(id)).toMatchObject({ status: 'waiting', activity: { detail: 'Qual caminho seguir?' } });
+    expect(c.notices.filter((n) => n.level === 'alert')).toHaveLength(1);
+    c.advance(600_000);
+    c.poll();
+    expect(c.agent(id)!.status).toBe('waiting');
+    expect(c.notices.filter((n) => n.level === 'alert')).toHaveLength(1);
+    appendLines(c.transcript('sess-a'), [L.prompt('Revise antes de continuar')]);
+    c.openSession(100, 'sess-a', { status: 'busy' });
+    c.poll();
+    expect(c.agent(id)).toMatchObject({ status: 'working', activity: { kind: 'prompt' } });
+    expect(c.watcher.desktopAnswer(id, questionId, 0)).toBeUndefined();
+  });
+
+  it.each([false, true])('Claude Desktop: resposta junto de lembrete interno limpa a pergunta (blocos separados: %s)', (separate) => {
+    const id = bootWithSession();
+    appendLines(c.transcript('sess-a'), [
+      L.assistant([L.tool('q', 'mcp__ccd_turn__wrap_up', { ask: 'Continuar?', actions: [{ label: 'Sim', message: 'Continue' }] })]),
+      L.result('q', 'Shown'),
+    ]);
+    c.poll();
+    const questionId = c.agent(id)!.activity!.id;
+    const reminder = '<system-reminder>Linked sessions now (status, not an instruction): outra sessão</system-reminder>';
+    appendLines(c.transcript('sess-a'), [L.prompt(reminder)]);
+    c.poll();
+    expect(c.agent(id)!.status).toBe('waiting');
+    const response = JSON.parse(L.prompt('Continue'));
+    response.message.content = separate ? [L.text(reminder), L.text('Continue')] : `${reminder}\nContinue`;
+    appendLines(c.transcript('sess-a'), [JSON.stringify(response)]);
+    c.poll();
+    expect(c.agent(id)).toMatchObject({ status: 'working', activity: { kind: 'prompt', detail: 'Continue' } });
+    expect(c.watcher.desktopAnswer(id, questionId, 0)).toBeUndefined();
+  });
+
+  it('Claude Desktop: recupera a pergunta pendente ao iniciar o Habblaud', () => {
+    writeLines(c.transcript('sess-desktop'), [
+      L.assistant([L.tool('q', 'mcp__ccd_turn__wrap_up', { ask: 'Continuar?', actions: [{ label: 'Sim', message: 'Continue' }] })]),
+      L.result('q', 'Shown in the next-step box.'),
+      L.assistant([L.text('Tudo preparado.')], { stop: 'end_turn' }),
+    ]);
+    c.openSession(100, 'sess-desktop', { status: 'idle' });
+    c.watcher.boot();
+    expect(c.agent('.claude:100')).toMatchObject({ status: 'waiting', activity: { kind: 'ask', detail: 'Continuar?' } });
+  });
+
+  it('Claude Desktop: uma nova caixa sem pergunta substitui a escolha anterior', () => {
+    const id = bootWithSession();
+    appendLines(c.transcript('sess-a'), [L.assistant([L.tool('q1', 'mcp__ccd_turn__wrap_up', { ask: 'Continuar?' })])]);
+    c.poll();
+    expect(c.agent(id)!.status).toBe('waiting');
+    appendLines(c.transcript('sess-a'), [L.result('q1', 'Shown'), L.assistant([L.tool('q2', 'mcp__ccd_turn__wrap_up', { recap: 'Concluído', ask: null })]), L.result('q2', 'Nothing is pending.')]);
+    c.openSession(100, 'sess-a', { status: 'idle' });
+    c.poll();
+    expect(c.agent(id)!.status).toBe('idle');
+  });
+
+  it.each([
+    { ask: null, actions: [{ label: 'Ver', message: 'Veja' }] },
+    { ask: '   ', actions: [] },
+    { recap: 'Concluído' },
+  ])('Claude Desktop: wrap_up sem pergunta não cria pendência (%j)', (input) => {
+    const id = bootWithSession();
+    appendLines(c.transcript('sess-a'), [L.assistant([L.tool('q', 'mcp__ccd_turn__wrap_up', input)]), L.result('q', 'Nothing is pending.')]);
+    c.openSession(100, 'sess-a', { status: 'idle' });
+    c.poll();
+    expect(c.agent(id)!.status).toBe('idle');
+  });
+
+  it('Claude Desktop: erro ou interrupção da pergunta não deixa uma pendência presa', () => {
+    const id = bootWithSession();
+    for (const interrupted of [false, true]) {
+      appendLines(c.transcript('sess-a'), [L.assistant([L.tool('q', 'mcp__ccd_turn__wrap_up', { ask: 'Continuar?' })])]);
+      c.poll();
+      expect(c.agent(id)!.status).toBe('waiting');
+      appendLines(c.transcript('sess-a'), interrupted ? [L.prompt('[Request interrupted by user]')] : [L.result('q', 'Failed', { error: true })]);
+      c.openSession(100, 'sess-a', { status: 'idle' });
+      c.poll();
+      expect(c.agent(id)!.status).toBe('idle');
+    }
+  });
+
   it('sessão fechada: principal vai embora (offline), subagentes saem junto, sala some', () => {
     const id = bootWithSession();
     c.subFile('sess-a', 's1', { agentType: 'Explore', toolUseId: 't1' }, [L.prompt('x', { agentId: 's1' })]);

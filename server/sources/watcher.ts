@@ -187,6 +187,13 @@ export class ClaudeWatcher implements AgentSource {
     this.useWatch = opts.watch ?? true;
   }
 
+  /** Só resolve opções da pergunta atual; a mensagem original nunca vai no snapshot da página. */
+  desktopAnswer(agentId: string, questionId: string, option: number): string | undefined {
+    const q = this.sessions.get(agentId)?.state.desktopQuestion;
+    if (!q || q.activityId !== questionId || this.opts.office.get(agentId)?.activity?.id !== questionId) return undefined;
+    return q.actions.get(option);
+  }
+
   /** Boot + polling periódico. */
   start(): void {
     this.boot();
@@ -348,7 +355,8 @@ export class ClaudeWatcher implements AgentSource {
       // CLIs antigas não gravam "shell": ocioso com Bash em segundo plano sem notificação = esperando o shell.
       if (status === 'idle' && t.shells.hasBackgroundShell(now, SHELL_FALLBACK_MAX_AGE_MS)) status = 'shell';
     }
-    office.setStatus(key, status, st.waitingFor);
+    if (t.state.desktopQuestion) status = 'waiting';
+    office.setStatus(key, status, t.state.desktopQuestion ? tr('responder uma pergunta') : st.waitingFor);
     office.fillWorkingActivity(key);
     office.fillShellActivity(key);
   }
@@ -510,7 +518,7 @@ export class ClaudeWatcher implements AgentSource {
     const results = lines.map((line) => parseWatchedLine(t.state, line, { idPrefix: t.key, now: this.now() }));
     for (const r of results) {
       for (const a of r.activities) {
-        if (a.activity.kind === 'ask' && a.toolUseId && !t.state.pendingTools.has(a.toolUseId)) {
+        if (a.activity.kind === 'ask' && a.toolUseId && !t.state.pendingTools.has(a.toolUseId) && t.state.desktopQuestion?.toolUseId !== a.toolUseId) {
           a.activity = { ...a.activity, ...SPECIAL.answered(a.activity.detail) };
         }
       }

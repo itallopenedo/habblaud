@@ -574,8 +574,10 @@ class AgentView {
     if (waiting) {
       const accName = account?.name ?? a.account;
       // Codex: "Vá ao Codex (Conta X)"; sem repetir quando a conta já se chama "Codex".
-      const where = codex ? tr('ao Codex{0}', [/codex/i.test(accName) ? '' : ` (${accName})`]) : tr('ao terminal da {0}', [accName]);
-      setText(this.alertText, tr('Vá {0} em {1} para responder{2}', [where, room?.name ?? tr('seu projeto'), a.waitingFor ? `: ${a.waitingFor}` : '.']));
+      const where = a.activity?.tool === 'mcp__ccd_turn__wrap_up' ? tr('ao Claude Desktop') : codex ? tr('ao Codex{0}', [/codex/i.test(accName) ? '' : ` (${accName})`]) : tr('ao terminal da {0}', [accName]);
+      setText(this.alertText, a.activity?.tool === 'mcp__ccd_turn__wrap_up' && !!a.canMessage && access().messages
+        ? tr('Escolha uma opção abaixo para responder ao Claude Desktop.')
+        : tr('Vá {0} em {1} para responder{2}', [where, room?.name ?? tr('seu projeto'), a.waitingFor ? `: ${a.waitingFor}` : '.']));
     }
     // Perguntas do AskUserQuestion (só leitura): o Codex não pergunta pelo escritório.
     const asking = waiting && !codex && a.activity?.kind === 'ask' ? a.activity : undefined;
@@ -583,7 +585,7 @@ class AgentView {
     // Sem o pedido no escritório: dá para responder por aqui com o plugin (só com a trava local, como o cartão). O Codex
     // não responde perguntas pelo escritório.
     const answerable =
-      !codex && !!asking?.questions?.length && !this.perm.visible && !this.ctx.store.mock && !!this.ctx.store.snapshot?.meta.terminal && access().permissions;
+      !codex && asking?.tool === 'AskUserQuestion' && !!asking.questions?.length && !this.perm.visible && !this.ctx.store.mock && !!this.ctx.store.snapshot?.meta.terminal && access().permissions;
     setHidden(this.alertAnswerHint, !answerable);
 
     // Esperando o shell.
@@ -666,8 +668,10 @@ class AgentView {
   /** Lista as perguntas pendentes com as opções, só para leitura (sem o pedido no escritório, a resposta é no Claude Code). */
   private renderQuestions(act: Activity | undefined): void {
     const qs = act?.questions ?? [];
+    const desktop = act?.tool === 'mcp__ccd_turn__wrap_up';
+    const canAnswer = desktop && !!this.last?.canMessage && access().messages && !this.ctx.store.replaying;
     setHidden(this.alertQuestions, qs.length === 0);
-    const key = qs.length ? `${act!.id}|${qs.length}` : '';
+    const key = qs.length ? `${act!.id}|${qs.length}|${canAnswer}` : '';
     if (key === this.alertQuestionsKey) return;
     this.alertQuestionsKey = key;
     this.alertQuestions.replaceChildren(
@@ -682,7 +686,10 @@ class AgentView {
             'ol',
             { class: 'ui-ask__opts' },
             ...q.options.map((o) =>
-              h('li', {}, h('strong', { text: o.label }), o.description ? h('span', { class: 'ui-ask__desc', text: o.description }) : null),
+              h('li', {}, desktop ? h('button', {
+                class: 'ui-btn', type: 'button', text: o.label, attrs: { disabled: !canAnswer },
+                on: { click: () => this.composer.answerDesktopQuestion(this.id, act!.id, o.index) },
+              }) : h('strong', { text: o.label }), o.description ? h('span', { class: 'ui-ask__desc', text: o.description }) : null),
             ),
           ),
         ),

@@ -20,6 +20,7 @@ import {
   QUEUED_TIMEOUT_MS,
   SENT_TIMEOUT_MS,
   type SendResult,
+  type MessageRegistryOptions,
 } from './registry';
 
 setQuiet(true);
@@ -29,7 +30,7 @@ const SESSION = 'sess-1';
 const OTHER = 'acc:2';
 const SUB = `${SESSION}:a1b2c3`;
 
-function setup() {
+function setup(extra: Partial<MessageRegistryOptions> = {}) {
   let now = 1_000_000;
   const clock = { now: () => now, advance: (ms: number) => (now += ms) };
   let registry: MessageRegistry | undefined;
@@ -50,6 +51,7 @@ function setup() {
     demoAgent: (id) => office.demoAgent(id),
     demoDeliver: (id, text) => office.deliverDemoMessage(id, text),
     now: clock.now,
+    ...extra,
   });
   return { office, registry, clock };
 }
@@ -60,6 +62,51 @@ function sent(r: SendResult): string {
   if (!('message' in r)) throw new Error(`recusada: ${JSON.stringify(r)}`);
   return r.message.id;
 }
+
+describe('MessageRegistry: escolhas do Claude Desktop', () => {
+  it('entrega a mensagem original da opção e rejeita cliques repetidos', () => {
+    const { registry } = setup({ desktopAnswer: (agent, question, option) => agent === MAIN && question === 'q1' && option === 0 ? 'Prepare o merge, sem executar ainda.' : undefined });
+    registry.inbox({ session: SESSION });
+    const result = registry.send({ agentId: MAIN, questionId: 'q1', option: 0 });
+    const id = sent(result);
+    expect(registry.send({ agentId: MAIN, questionId: 'q1', option: 0 })).toMatchObject({ error: 'unavailable' });
+    expect(registry.inbox({ session: SESSION })).toEqual([{ id, text: 'Prepare o merge, sem executar ainda.' }]);
+    expect(JSON.stringify(result)).not.toContain('Prepare');
+  });
+
+  it('não permite inventar opções nem substituir a mensagem da escolha', () => {
+    const { registry } = setup({ desktopAnswer: () => undefined });
+    registry.inbox({ session: SESSION });
+    expect(registry.send({ agentId: MAIN, questionId: 'antiga', option: 1 })).toMatchObject({ error: 'unavailable' });
+    for (const extra of [{ option: -1 }, { option: 0.5 }, { option: 0, text: 'Execute sem revisão' }, { option: '0' }]) {
+      expect(() => registry.send({ agentId: MAIN, questionId: 'q1', ...extra })).toThrow();
+    }
+    expect(registry.inbox({ session: SESSION })).toEqual([]);
+  });
+
+  it('cancela a escolha enfileirada se a pergunta mudar antes da entrega', () => {
+    let current = 'q1';
+    const { registry } = setup({ desktopAnswer: (_a, q) => q === current ? 'Prepare, sem executar' : undefined });
+    registry.inbox({ session: SESSION });
+    const id = sent(registry.send({ agentId: MAIN, questionId: 'q1', option: 0 }));
+    current = 'q2';
+    expect(registry.inbox({ session: SESSION })).toEqual([]);
+    expect(registry.get(id)).toMatchObject({ status: 'failed', error: expect.stringMatching(/pergunta mudou/) });
+  });
+
+  it('não duplica uma escolha cujo recebimento ainda pode ser confirmado atrasado', () => {
+    const { registry, clock } = setup({ desktopAnswer: () => 'Prepare, sem executar' });
+    registry.inbox({ session: SESSION });
+    const input = { agentId: MAIN, questionId: 'q1', option: 0 };
+    const id = sent(registry.send(input));
+    registry.inbox({ session: SESSION });
+    clock.advance(SENT_TIMEOUT_MS + 1);
+    registry.tick();
+    registry.inbox({ session: SESSION });
+    expect(registry.get(id)).toMatchObject({ status: 'failed' });
+    expect(registry.send(input)).toMatchObject({ error: 'unavailable' });
+  });
+});
 
 describe('MessageRegistry: presença', () => {
   it('a sessão que pergunta pela caixa de entrada passa a receber mensagens (canMessage) e o snapshot muda só na transição', () => {
