@@ -10,6 +10,8 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+## [1.0.4] - 2026-10-27
+
 ### Corrigido
 
 - **Perguntas do Claude Desktop aparecem como pendentes.** A caixa de próximos passos (`ccd_turn.wrap_up`) passa a
@@ -18,6 +20,8 @@ do meio (0.**3**.0).
   usando o plugin de mensagens, inclusive pelo celular com acesso a mensagens. O servidor valida a pergunta atual e
   entrega a mensagem original da ação, impedindo escolhas antigas e cliques repetidos.
   Respostas acompanhadas de lembretes internos também encerram a pendência, sem deixar perguntas antigas no painel.
+
+### Adicionado
 
 - **Avisos no iPhone:** auxiliar local opcional `scripts/phone-notify.mjs` envia alertas genéricos pelo ntfy quando
   surgem agentes esperando resposta, com deduplicação persistente e nova tentativa após falhas de rede.
@@ -588,7 +592,8 @@ Primeira versão publicada.
   Subagentes chegam, trabalham e entregam ao principal. Mostra as duas contas, com o uso de 5 horas e semanal de
   cada uma (tap de statusline), além de feed de atividade, avisos e modo demonstração. Roda no Node ou no Docker local.
 
-[Não lançado]: https://github.com/marmottajr/habblaud/compare/v1.0.3...HEAD
+[Não lançado]: https://github.com/marmottajr/habblaud/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/marmottajr/habblaud/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/marmottajr/habblaud/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/marmottajr/habblaud/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/marmottajr/habblaud/compare/v1.0.0...v1.0.1
