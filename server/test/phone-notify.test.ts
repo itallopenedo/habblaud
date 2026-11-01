@@ -188,6 +188,20 @@ describe('phone notification bridge', () => {
     expect(messages).toHaveLength(0);
   });
 
+  it('não avisa travado o agente que espera um subagente em andamento', async () => {
+    const notifier = await createNotifier({ ...options, stuckMs: 15 * 60_000 });
+    clock = 20 * 60_000;
+    const parent = { ...agent('parent', 'p', 'working'), lastEventAt: 0 };
+    const child = { ...agent('child', 'c', 'working'), parentId: 'parent', lastEventAt: 19 * 60_000 };
+    snapshot = { agents: [parent, child] };
+    await notifier.poll();
+    expect(messages).toHaveLength(0);
+    // O subagente terminou e o pai continua sem novidade: agora sim está travado.
+    snapshot = { agents: [parent] };
+    await notifier.poll();
+    expect(messages).toHaveLength(1);
+  });
+
   it('avisa agente parado com erro, junto da espera, com texto genérico', async () => {
     const notifier = await createNotifier(options);
     snapshot = { agents: [

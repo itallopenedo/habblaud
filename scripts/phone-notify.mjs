@@ -11,7 +11,7 @@ const home = join(homedir(), '.habblaud');
 export async function createNotifier({
   configPath = join(home, 'iphone-access.json'), statePath = join(home, 'phone-notify-state.json'),
   fetchImpl = fetch, now = Date.now, log = console.log,
-  stuckMs = Number(process.env.HABBLAUD_STUCK_MIN || 15) * 60000,
+  stuckMs = ((m) => (m > 0 ? m : 15) * 60000)(Number(process.env.HABBLAUD_STUCK_MIN)),
 } = {}) {
   const { topic, url } = JSON.parse(await readFile(configPath, 'utf8'));
   const click = new URL(url);
@@ -62,8 +62,12 @@ export async function createNotifier({
             || (agent.waitingFor != null && typeof agent.waitingFor !== 'string'))) throw new Error('Snapshot inválido.');
         const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
         const waiting = snapshot.agents.filter((agent) => agent.status === 'waiting');
+        // Quem espera um subagente em andamento fica 'working' com o lastEventAt parado: não é travado.
+        const waitingOnChild = new Set(snapshot.agents
+          .filter((child) => child.parentId && ['working', 'waiting', 'shell'].includes(child.status))
+          .map((child) => child.parentId));
         const stuck = snapshot.agents.filter((agent) => agent.status === 'working' && !agent.shells?.length
-          && now() - agent.lastEventAt > stuckMs);
+          && !waitingOnChild.has(agent.id) && now() - agent.lastEventAt > stuckMs);
         const errors = snapshot.agents.filter((agent) => !['working', 'waiting'].includes(agent.status)
           && agent.activity?.error === true);
         const pending = new Set([

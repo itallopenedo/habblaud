@@ -668,7 +668,7 @@ class AgentView {
     setHidden(this.codexHint, !codex || a.kind !== 'main' || !live || this.ctx.store.replaying);
   }
 
-  /** Lista as perguntas pendentes com as opções, só para leitura (sem o pedido no escritório, a resposta é no Claude Code). */
+  /** Lista as perguntas pendentes com as opções, só para leitura (sem o pedido no escritório, a resposta é no Claude Code ou no Codex). */
   private renderQuestions(act: Activity | undefined): void {
     const qs = act?.questions ?? [];
     const desktop = act?.tool === 'mcp__ccd_turn__wrap_up';

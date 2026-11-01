@@ -70,6 +70,8 @@ Só configuração, com o Itallo:
    botões também para perguntas do Codex. Se falhar: os botões mandam o rótulo como mensagem de texto comum, e o
    CHANGELOG diz isso.
 3. Check: testes de registry (opção antiga recusada, duplicidade recusada) e de rollout; caso real no Codex.
+4. Resultado do spike (2026-11-01): a fila do Codex (`codex queue`) só entrega depois que o turno termina e a pergunta aberta
+   mantém o turno aberto; responder o Codex continua sendo no Codex. O escritório mostra a pergunta e a dica ⇧←.
 
 **G. Alertas de travado e de erro** em `scripts/phone-notify.mjs`:
 

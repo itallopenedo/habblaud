@@ -699,6 +699,9 @@ export class CodexSource implements AgentSource, CodexLive {
   /** Pergunta aberta e o Codex ainda dando sinal de vida (hooks e escritas do `sleep` da espera). */
   private asking(t: ThreadTracker, now: number): boolean {
     if (!t.state.questions.size) return false;
+    // `request_user_input` (síncrono, modo Plan) bloqueia sem saída, sleep nem hooks: pergunta ainda sem
+    // function_call_output continua em `pending` e é uma espera viva, por mais quieto que esteja.
+    if ([...t.state.questions].some((id) => t.state.pending.has(id))) return true;
     return now - Math.max(t.lastWriteAt ?? 0, t.lastHookAt ?? 0, t.state.lastAt ?? 0) < QUESTION_QUIET_MS;
   }
 

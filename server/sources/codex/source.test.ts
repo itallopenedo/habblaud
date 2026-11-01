@@ -509,7 +509,27 @@ describe('fonte do Codex: eventos de hook', () => {
     // O processo morreu: nenhum hook, nenhuma escrita. O lock fica.
     ctx.advance(QUESTION_QUIET_MS + 1_000);
     ctx.poll();
-    expect(ctx.agent()?.status).not.toBe('waiting');
+    expect(ctx.agent()?.status).toBe('idle');
+  });
+
+  it('pergunta síncrona (request_user_input) ainda sem resposta continua esperando além de QUESTION_QUIET_MS', () => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('UserPromptSubmit', { prompt: 'me pergunte' }));
+    const q = { questions: [{ title: 'Qual cor?', options: ['Azul', 'Verde'] }] };
+    ctx.home.rollout(T, [
+      R.meta(T, { at: ctx.now() - 5_000, cwd: '/projetos/api' }),
+      R.taskStarted('turn1', ctx.now() - 4_000),
+      R.functionCall('q1', 'request_user_input', q, ctx.now() - 3_000),
+    ]);
+    ctx.home.lock(T, ctx.now() - 5_000);
+    ctx.advance(3_100);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('waiting');
+    // A chamada síncrona bloqueia sem saída, sleep nem hooks: a pergunta ainda aberta segue valendo.
+    ctx.advance(QUESTION_QUIET_MS + 1_000);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('waiting');
   });
 
   it('apply_patch e MCP: as mesmas atividades do Claude Code', () => {

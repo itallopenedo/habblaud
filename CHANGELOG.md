@@ -31,8 +31,8 @@ do meio (0.**3**.0).
 - **`npm run upstream:sync` (fork):** traz a versão nova do upstream para o `meu-habblaud` num worktree temporário,
   roda os checks e nunca faz push. Ver `FORK.md`.
 - **Avisos de travado e de erro no iPhone:** o `scripts/phone-notify.mjs` também avisa quando um agente fica trabalhando
-  sem novidade por mais de 15 min (`HABBLAUD_STUCK_MIN`; não conta comandos ainda rodando) e quando para com erro. Texto
-  genérico, como o aviso de espera.
+  sem novidade por mais de 15 min (`HABBLAUD_STUCK_MIN`; não conta comandos do Claude Code ainda rodando em segundo
+  plano nem agentes esperando um subagente) e quando para com erro. Texto genérico, como o aviso de espera.
 
 ## [1.0.4] - 2026-10-27
 
