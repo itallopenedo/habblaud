@@ -464,9 +464,9 @@ class LineParser {
       const actions = new Map<number, string>();
       if (Array.isArray(input.actions)) input.actions.slice(0, 6).forEach((a, i) => {
         if (!a || typeof a !== 'object' || !str(a.label)) return;
-        // Botão de resposta sem `message`: o Claude Desktop manda o próprio rótulo. Botão de ação do app (`action`) não
-        // vira texto e fica sem resposta por aqui.
-        const message = typeof a.message === 'string' ? a.message : a.action === undefined ? str(a.label) : undefined;
+        // Botão sem `message`: a resposta é o próprio rótulo. Vale também para o botão de ação do app (`action`): o
+        // escritório não roda a ação, manda o rótulo (agentes usam `action` em botões que são, na prática, respostas).
+        const message = typeof a.message === 'string' ? a.message : str(a.label);
         if (message?.trim() && message.length <= 20_000) actions.set(i, message);
       });
       s.desktopQuestion = desc.kind === 'ask' ? { toolUseId: id, actions } : undefined;

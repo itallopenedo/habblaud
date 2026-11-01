@@ -475,7 +475,7 @@ describe('ClaudeWatcher', () => {
     expect(c.agent('.claude:100')).toMatchObject({ status: 'waiting', activity: { kind: 'ask', detail: 'Continuar?' } });
   });
 
-  it('Claude Desktop: botão só com rótulo responde com o próprio rótulo; botão de ação do app não tem resposta', () => {
+  it('Claude Desktop: botão só com rótulo (e o de ação do app) responde com o próprio rótulo', () => {
     const id = bootWithSession();
     appendLines(c.transcript('sess-a'), [
       L.assistant([L.tool('q', 'mcp__ccd_turn__wrap_up', { ask: 'Faço o merge?', actions: [{ label: 'Sim, tudo' }, { action: 'commit', label: 'Commit' }] })]),
@@ -484,7 +484,8 @@ describe('ClaudeWatcher', () => {
     expect(c.agent(id)!.status).toBe('waiting');
     const questionId = c.agent(id)!.activity!.id;
     expect(c.watcher.desktopAnswer(id, questionId, 0)).toBe('Sim, tudo');
-    expect(c.watcher.desktopAnswer(id, questionId, 1)).toBeUndefined();
+    // Ação do app (commit, PR, comentários): o escritório não roda a ação, manda o rótulo como resposta.
+    expect(c.watcher.desktopAnswer(id, questionId, 1)).toBe('Commit');
   });
 
   it('Claude Desktop: uma nova caixa sem pergunta substitui a escolha anterior', () => {
