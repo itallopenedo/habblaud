@@ -102,7 +102,8 @@ export interface AskQuestion {
   header?: string;
   multiSelect?: boolean;
   /** `index` = posição da opção em `options` do original: é ela que volta na resposta (PermissionAnswer). */
-  options: Array<{ index: number; label: string; description?: string }>;
+  /** `appOnly`: botão da caixa do Claude Desktop que roda uma ação do app (commit, PR); não vira texto por aqui. */
+  options: Array<{ index: number; label: string; description?: string; appOnly?: true }>;
 }
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed';

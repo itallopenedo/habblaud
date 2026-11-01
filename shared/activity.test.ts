@@ -232,4 +232,15 @@ describe('AskUserQuestion no escritório', () => {
   it('sem perguntas válidas, não cria o campo', () => {
     expect(describeTool('AskUserQuestion', {}).questions).toBeUndefined();
   });
+
+  it('caixa do Claude Desktop: botão de ação do app (action) vem marcado appOnly; botão de resposta não', () => {
+    const d = describeTool('mcp__ccd_turn__wrap_up', {
+      ask: 'Posso montar a lista?',
+      actions: [{ label: 'Sim, montar', action: 'address_comments' }, { label: 'Outra forma' }],
+    });
+    expect(d.questions![0]!.options).toEqual([
+      { index: 0, label: 'Sim, montar', appOnly: true },
+      { index: 1, label: 'Outra forma' },
+    ]);
+  });
 });
