@@ -161,6 +161,45 @@ describe('phone notification bridge', () => {
     expect(messages).toHaveLength(2);
   });
 
+  it('avisa agente travado (working sem novidade além do limite) uma vez por episódio', async () => {
+    const notifier = await createNotifier({ ...options, stuckMs: 15 * 60_000 });
+    clock = 20 * 60_000;
+    snapshot = { agents: [{ ...agent('busy', 'act-1', 'working'), lastEventAt: 0 }] };
+    await notifier.poll();
+    await notifier.poll();
+    expect(messages).toHaveLength(1);
+    expect(messages[0].message).toBe('Há 1 agentes sem novidade há mais de 15 min. Abra o Habblaud.');
+    // Voltou a ter novidade e travou de novo: novo episódio.
+    snapshot = { agents: [{ ...agent('busy', 'act-2', 'working'), lastEventAt: 19 * 60_000 }] };
+    await notifier.poll();
+    clock = 40 * 60_000;
+    await notifier.poll();
+    expect(messages).toHaveLength(2);
+  });
+
+  it('não avisa travado com shell rodando nem dentro do limite', async () => {
+    const notifier = await createNotifier({ ...options, stuckMs: 15 * 60_000 });
+    clock = 20 * 60_000;
+    snapshot = { agents: [
+      { ...agent('shell', 'a', 'working'), lastEventAt: 0, shells: [{ id: 's1' }] },
+      { ...agent('fresh', 'b', 'working'), lastEventAt: 10 * 60_000 },
+    ] };
+    await notifier.poll();
+    expect(messages).toHaveLength(0);
+  });
+
+  it('avisa agente parado com erro, junto da espera, com texto genérico', async () => {
+    const notifier = await createNotifier(options);
+    snapshot = { agents: [
+      agent(),
+      { ...agent('broken', 'err-1', 'idle'), activity: { id: 'err-1', text: 'PRIVATE ERROR', kind: 'error', error: true } },
+    ] };
+    await notifier.poll();
+    expect(messages).toHaveLength(1);
+    expect(messages[0].message).toBe('Há 1 agentes aguardando sua resposta, 1 agentes parados com erro. Abra o Habblaud.');
+    expect(JSON.stringify(messages[0])).not.toContain('PRIVATE');
+  });
+
   it('caps repeated delivery failures at a one minute retry interval', async () => {
     const notifier = await createNotifier(options);
     failSend = true;
