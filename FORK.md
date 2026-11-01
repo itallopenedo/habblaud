@@ -11,5 +11,6 @@ Versão nova do upstream:
     npm run upstream:sync
 
 Ele avança a `main` (só fast-forward), faz o merge em `meu-habblaud` num worktree temporário e roda typecheck,
-testes e i18n. Com conflito ou teste vermelho, o worktree fica para resolver e nada anda. Nunca faz push: depois de
+testes e i18n. Com conflito ou teste vermelho, o worktree fica para resolver e `meu-habblaud` não anda (a `main` pode
+ter avançado, pois só espelha o upstream). Nunca faz push: depois de
 conferir, `git push fork meu-habblaud` e `npm run docker:up` (ou o serviço nativo, a partir da Fase 5).

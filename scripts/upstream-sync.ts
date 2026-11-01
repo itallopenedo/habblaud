@@ -2,10 +2,10 @@
 //   npm run upstream:sync                       -> origin/main -> main (só fast-forward) -> merge em meu-habblaud
 //   npm run upstream:sync -- --branch outro     -> outro branch próprio
 //   npm run upstream:sync -- --no-checks        -> sem typecheck/testes/i18n (não recomendado)
-// O merge acontece num worktree temporário. Com conflito ou check vermelho, o worktree fica para resolver e nenhum
-// branch anda. Nunca faz push. Ver FORK.md.
+// O merge acontece num worktree temporário. Com conflito ou check vermelho, o worktree fica para resolver e
+// meu-habblaud não anda (a main, que só espelha o upstream, pode ter avançado antes). Nunca faz push. Ver FORK.md.
 import { execFileSync } from 'node:child_process';
-import { existsSync, symlinkSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -54,6 +54,14 @@ export function checkedOutAt(repo: string, branch: string): string | undefined {
   return undefined;
 }
 
+/** O .gitignore pega `node_modules/` só como diretório; o link do worktree é arquivo, então ignora-se no exclude compartilhado. */
+function excludeModules(wt: string): void {
+  const file = resolve(wt, git(wt, 'rev-parse', '--git-path', 'info/exclude'));
+  mkdirSync(dirname(file), { recursive: true });
+  const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  if (!text.split('\n').includes('/node_modules')) appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}/node_modules\n`);
+}
+
 /** Move `branch` para `sha`: por fast-forward no worktree onde ele está em uso, ou direto no ref. */
 function advance(repo: string, branch: string, sha: string): void {
   const at = checkedOutAt(repo, branch);
@@ -79,11 +87,15 @@ export function upstreamSync(o: SyncOptions): SyncResult {
   git(o.repo, 'worktree', 'add', '--quiet', '--detach', o.worktreeDir, o.branch);
   if (!gitOk(o.worktreeDir, 'merge', '--no-ff', '--no-edit', '-m', `Merge do upstream (${remote}) em ${o.branch}`, o.base)) {
     const files = git(o.worktreeDir, 'diff', '--name-only', '--diff-filter=U').split('\n').filter(Boolean);
+    excludeModules(o.worktreeDir);
     return { status: 'conflict', worktree: o.worktreeDir, files };
   }
   // Os checks usam as dependências já instaladas no checkout principal.
   const modules = join(o.repo, 'node_modules');
-  if (existsSync(modules) && !existsSync(join(o.worktreeDir, 'node_modules'))) symlinkSync(modules, join(o.worktreeDir, 'node_modules'));
+  if (existsSync(modules) && !existsSync(join(o.worktreeDir, 'node_modules'))) {
+    symlinkSync(modules, join(o.worktreeDir, 'node_modules'));
+    excludeModules(o.worktreeDir);
+  }
   for (const check of o.checks) {
     try {
       execFileSync(check[0], check.slice(1), { cwd: o.worktreeDir, stdio: o.quiet ? 'ignore' : 'inherit' });
@@ -124,7 +136,7 @@ function summary(r: SyncResult, branch: string, repo: string): string {
     case 'merged':
       return `✓ ${branch}: ${r.from.slice(0, 7)} → ${r.to.slice(0, 7)}. Confira e, se quiser, git push fork ${branch}.`;
     case 'conflict':
-      return `✗ Conflito em ${r.files.join(', ')}. Resolva em ${r.worktree} e commite lá (git -C ${r.worktree} commit --no-edit). Depois: ${recoveryHint(repo, branch, r.worktree)}`;
+      return `✗ Conflito em ${r.files.join(', ')}. Resolva em ${r.worktree} e commite lá (git -C ${r.worktree} commit --no-edit); rode os checks lá (ln -s ${repo}/node_modules ${r.worktree}/node_modules; npm run typecheck && npm test && npm run i18n:check). Depois: ${recoveryHint(repo, branch, r.worktree)}`;
     case 'checks-failed':
       return `✗ O check "${r.check}" falhou depois do merge; ${branch} não mudou. Corrija e commite em ${r.worktree}, rode os checks lá e depois: ${recoveryHint(repo, branch, r.worktree)}`;
     case 'refused':

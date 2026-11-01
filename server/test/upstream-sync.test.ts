@@ -1,7 +1,7 @@
 // scripts/upstream-sync.ts: a main anda só por fast-forward, o merge acontece num worktree temporário e o branch
 // próprio nunca anda com conflito, check vermelho ou mudança não commitada.
 import { execFileSync, execSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -156,6 +156,27 @@ describe('recoveryHint', () => {
     expect(sh(repo, 'show', 'meu-habblaud:a.txt')).toBe('resolvido');
     expect(sh(repo, 'rev-list', '--parents', '-n1', 'meu-habblaud').split(' ')).toHaveLength(3);
     expect(existsSync(r.worktree)).toBe(false);
+  });
+});
+
+describe('node_modules do worktree temporário', () => {
+  it('o link de node_modules fica ignorado: checks vermelho deixa o worktree limpo e a dica o remove', () => {
+    const { up, repo, opts } = setup();
+    // No Mac, o .gitignore do repo pega node_modules/; fora dele, o mesmo efeito vem do exclude do próprio repo.
+    mkdirSync(join(repo, 'node_modules'));
+    writeFileSync(join(repo, 'node_modules', 'pacote.js'), 'x\n');
+    appendFileSync(join(repo, '.git', 'info', 'exclude'), 'node_modules/\n');
+    commit(up, 'b.txt', 'novo\n');
+    const o = opts({ checks: [['false']] });
+    expect(upstreamSync(o)).toEqual({ status: 'checks-failed', worktree: o.worktreeDir, check: 'false' });
+    expect(sh(o.worktreeDir, 'status', '--porcelain')).toBe('');
+    writeFileSync(join(o.worktreeDir, 'fix.txt'), 'conserto\n');
+    sh(o.worktreeDir, 'add', 'fix.txt');
+    sh(o.worktreeDir, 'commit', '-qm', 'conserto');
+    execSync(recoveryHint(repo, 'meu-habblaud', o.worktreeDir), { shell: '/bin/sh', stdio: 'ignore' });
+    expect(sh(repo, 'show', 'meu-habblaud:fix.txt')).toBe('conserto');
+    expect(sh(repo, 'show', 'meu-habblaud:b.txt')).toBe('novo');
+    expect(existsSync(o.worktreeDir)).toBe(false);
   });
 });
 
