@@ -14,7 +14,8 @@ do meio (0.**3**.0).
 
 - **Perguntas do Codex aparecem em “precisam de você”.** Quando o Codex pergunta (`request_user_input`), o agente
   fica esperando você, com a pergunta e as opções, até a sua resposta. O aviso de que a pergunta foi aceita não
-  encerra mais a espera.
+  encerra mais a espera, as ferramentas que o Codex roda enquanto espera (como `sleep`) não o devolvem a “trabalhando”
+  e uma pergunta que o Codex recusa não fica presa.
 
 ### Adicionado
 
