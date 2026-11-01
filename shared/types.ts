@@ -301,6 +301,20 @@ export interface AccountUsage {
 }
 
 /** Uma conta do Claude (um config dir: ~/.claude, ~/.claude-conta2, ...) ou do Codex (um CODEX_HOME: ~/.codex). */
+/** Tokens por tipo (entrada, saída, escrita e leitura de cache). */
+export interface TokenTotals {
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead: number;
+}
+
+/** Uso do Fable por conta: hoje e nos últimos 7 dias (hoje incluído). */
+export interface FableUsage {
+  today: TokenTotals;
+  week: TokenTotals;
+}
+
 export interface AccountInfo {
   /** = AgentInfo.account (basename do config dir, ex.: ".claude"); único entre as contas de todas as ferramentas. */
   id: string;
@@ -320,6 +334,8 @@ export interface AccountInfo {
   /** Sessões abertas agora nesta conta. */
   sessions: number;
   usage?: AccountUsage;
+  /** Tokens do Fable (sem limite semanal, então sem %): hoje e nos últimos 7 dias, lidos das transcrições locais. */
+  fable?: FableUsage;
   /**
    * - ok: números recentes;
    * - stale: números antigos (ex.: cache do /usage de horas atrás);

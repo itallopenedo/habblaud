@@ -307,6 +307,20 @@ export function planTasks(args: Rec): TaskItem[] | undefined {
   return out;
 }
 
+/** Perguntas ao usuário do Codex: a chamada fica sem resultado até a resposta (o agente espera você). */
+export const QUESTION_TOOLS = new Set<string>(['request_user_input', 'request_user_input_async']);
+
+/** `questions: [{title, options: [texto]}]` do Codex, no formato do AskUserQuestion (question, options: {label}). */
+function codexQuestions(input: Rec): Rec[] {
+  const qs = Array.isArray(input.questions) ? input.questions : [];
+  return qs.flatMap((q) => {
+    const r = rec(q);
+    if (!r) return [];
+    const options = Array.isArray(r.options) ? r.options.map((o) => (typeof o === 'string' ? { label: o } : o)) : [];
+    return [{ question: str(r.title) ?? str(r.question), options }];
+  });
+}
+
 /**
  * Atividade de uma ferramenta do Codex pelo nome que ela tem no rollout, no hook ou no app (exec_command, shell,
  * Bash, apply_patch, mcp__…, spawn_agent, exec do code mode...). `name` volta normalizado (Bash, Edit, Write,
@@ -364,6 +378,9 @@ export function describeCodexTool(rawName: string, input: Rec, namespace?: strin
       return { desc: { kind: 'delegate', icon: '👥', text: tr('Encerrando um subagente') }, tool: name };
     case 'request_permissions':
       return { desc: { kind: 'wait', icon: '🔐', text: tr('Pedindo permissões') }, tool: name };
+    case 'request_user_input':
+    case 'request_user_input_async':
+      return { desc: describeTool('AskUserQuestion', { questions: codexQuestions(input) }), tool: name };
     default:
       return { desc: describeTool(name, input), tool: name };
   }
@@ -388,6 +405,8 @@ export interface CodexState {
   lastAt?: number;
   /** Chamadas de ferramenta ainda sem resultado (call_id → nome). */
   pending: Map<string, string>;
+  /** Perguntas ao usuário sem resposta (call_id). O resultado da chamada chega logo ({accepted}); a resposta é outra mensagem. */
+  questions: Set<string>;
   /** Uso do plano mais recente (rate_limits) e o plano. */
   usage?: AccountUsage;
   planType?: string;
@@ -395,7 +414,7 @@ export interface CodexState {
 }
 
 export function createCodexState(meta?: RolloutMeta): CodexState {
-  const s: CodexState = { tasks: [], stats: { toolCalls: 0, tokensIn: 0, tokensOut: 0, subagents: 0 }, pending: new Map() };
+  const s: CodexState = { tasks: [], stats: { toolCalls: 0, tokensIn: 0, tokensOut: 0, subagents: 0 }, pending: new Map(), questions: new Set() };
   if (meta) applyMeta(s, meta);
   return s;
 }
@@ -413,6 +432,8 @@ export type CodexSignal =
   | { type: 'turnEnd'; aborted: boolean }
   /** Algo concluiu dentro do turno (tira a espera por aprovação). */
   | { type: 'progress' }
+  /** Pergunta ao usuário aberta (open) ou respondida: o escritório mostra a espera por resposta. */
+  | { type: 'question'; open: boolean }
   | { type: 'usage'; usage: AccountUsage; plan?: string }
   | { type: 'github'; event: GitHubEvent; key: string }
   | { type: 'meta'; meta: RolloutMeta };
@@ -637,6 +658,7 @@ class RolloutLineParser {
   private endTurn(aborted: boolean): void {
     this.s.turnOpen = false;
     this.s.pending.clear();
+    this.s.questions.clear();
     this.out.signals.push({ type: 'turnEnd', aborted });
   }
 
@@ -832,6 +854,16 @@ class RolloutLineParser {
   private responseItem(p: Rec): void {
     switch (p.type) {
       case 'message': {
+        // Resposta à pergunta (request_user_input): a mensagem traz o call_id da pergunta, que sai da lista.
+        if (p.role === 'user' && this.s.questions.size) {
+          const text = JSON.stringify(p.content ?? '');
+          const answered = [...this.s.questions].filter((id) => text.includes(id));
+          if (answered.length) {
+            for (const id of answered) this.s.questions.delete(id);
+            this.out.signals.push({ type: 'question', open: this.s.questions.size > 0 });
+            this.push(SPECIAL.answered(), { key: `${answered[0]}:answer` });
+          }
+        }
         // Só a resposta entregue no code mode (as outras mensagens são o contexto mandado ao modelo).
         const delivered = deliveredMessage(this.j);
         if (delivered) {
@@ -852,6 +884,10 @@ class RolloutLineParser {
         if (this.s.mode === 'legacy') {
           this.s.stats.toolCalls++;
           this.changed();
+        }
+        if (callId && QUESTION_TOOLS.has(name)) {
+          this.s.questions.add(callId);
+          this.out.signals.push({ type: 'question', open: true });
         }
         if (name === 'update_plan') {
           const tasks = planTasks(input);

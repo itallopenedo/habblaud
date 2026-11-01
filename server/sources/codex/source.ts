@@ -607,6 +607,13 @@ export class CodexSource implements AgentSource, CodexLive {
     const s = t.state;
     const at = s.lastAt ?? 0;
     if (at < t.statusAt) return;
+    // Pergunta sem resposta: o agente espera você, mesmo com o turno aberto.
+    if (s.questions.size) {
+      t.status = 'waiting';
+      t.statusAt = at;
+      t.waitingFor = tr('responder uma pergunta');
+      return;
+    }
     let status: AgentStatus;
     if (s.turnOpen !== undefined) status = s.turnOpen ? 'working' : 'idle';
     else status = s.lastAt !== undefined && this.now() - s.lastAt < LEGACY_WORKING_MS ? 'working' : 'idle';
@@ -634,6 +641,9 @@ export class CodexSource implements AgentSource, CodexLive {
           break;
         case 'progress':
           if (t.status === 'waiting') this.decide(t, 'working', r.at, undefined, live);
+          break;
+        case 'question':
+          this.decide(t, sig.open ? 'waiting' : 'working', r.at, sig.open ? tr('responder uma pergunta') : undefined, live);
           break;
         default:
           break;

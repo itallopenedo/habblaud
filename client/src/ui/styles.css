@@ -1051,6 +1051,14 @@
   row-gap: 1px;
 }
 
+/* Fable: só total de tokens (sem barra, porque não há limite semanal). */
+.ui-usage-card__fable {
+  margin: 2px 0 0;
+  font-size: 0.8em;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Números antigos: barras e percentuais em cinza (legíveis), sem apagar o bloco inteiro. */
 .ui-usage-card__meters.is-dim .ui-meter {
   --lv: #a3abbd;
