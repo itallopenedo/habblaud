@@ -475,6 +475,18 @@ describe('ClaudeWatcher', () => {
     expect(c.agent('.claude:100')).toMatchObject({ status: 'waiting', activity: { kind: 'ask', detail: 'Continuar?' } });
   });
 
+  it('Claude Desktop: botão só com rótulo responde com o próprio rótulo; botão de ação do app não tem resposta', () => {
+    const id = bootWithSession();
+    appendLines(c.transcript('sess-a'), [
+      L.assistant([L.tool('q', 'mcp__ccd_turn__wrap_up', { ask: 'Faço o merge?', actions: [{ label: 'Sim, tudo' }, { action: 'commit', label: 'Commit' }] })]),
+    ]);
+    c.poll();
+    expect(c.agent(id)!.status).toBe('waiting');
+    const questionId = c.agent(id)!.activity!.id;
+    expect(c.watcher.desktopAnswer(id, questionId, 0)).toBe('Sim, tudo');
+    expect(c.watcher.desktopAnswer(id, questionId, 1)).toBeUndefined();
+  });
+
   it('Claude Desktop: uma nova caixa sem pergunta substitui a escolha anterior', () => {
     const id = bootWithSession();
     appendLines(c.transcript('sess-a'), [L.assistant([L.tool('q1', 'mcp__ccd_turn__wrap_up', { ask: 'Continuar?' })])]);
