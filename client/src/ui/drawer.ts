@@ -575,8 +575,7 @@ class AgentView {
       const accName = account?.name ?? a.account;
       // Codex: "Vá ao Codex (Conta X)"; sem repetir quando a conta já se chama "Codex".
       const where = a.activity?.tool === 'mcp__ccd_turn__wrap_up' ? tr('ao Claude Desktop') : codex ? tr('ao Codex{0}', [/codex/i.test(accName) ? '' : ` (${accName})`]) : tr('ao terminal da {0}', [accName]);
-      const replyable = !!a.activity?.questions?.some((q) => q.options.some((o) => !o.appOnly));
-      setText(this.alertText, a.activity?.tool === 'mcp__ccd_turn__wrap_up' && replyable && !!a.canMessage && access().messages
+      setText(this.alertText, a.activity?.tool === 'mcp__ccd_turn__wrap_up' && !!a.canMessage && access().messages
         ? tr('Escolha uma opção abaixo para responder ao Claude Desktop.')
         : codex && a.activity?.kind === 'ask'
           ? tr('Responda no Codex: no terminal, ⇧← abre a pergunta.')
@@ -690,11 +689,11 @@ class AgentView {
             { class: 'ui-ask__opts' },
             ...q.options.map((o) =>
               h('li', {}, desktop ? h('button', {
-                class: 'ui-btn', type: 'button', text: o.label, attrs: { disabled: !canAnswer || !!o.appOnly },
+                class: 'ui-btn', type: 'button', text: o.label, attrs: { disabled: !canAnswer },
                 on: { click: () => this.composer.answerDesktopQuestion(this.id, act!.id, o.index) },
               }) : h('strong', { text: o.label }), o.description ? h('span', { class: 'ui-ask__desc', text: o.description }) : null,
-              // Ação do app (commit, PR, comentários): só o Claude Desktop sabe rodar.
-              desktop && o.appOnly ? h('span', { class: 'ui-ask__desc', text: tr('Ação do Claude Desktop: escolha por lá.') }) : null),
+              // Ação do app (commit, PR, comentários): daqui vai só o texto do botão; a ação em si só o Claude Desktop roda.
+              desktop && o.appOnly ? h('span', { class: 'ui-ask__desc', text: tr('Daqui vai o texto do botão; a ação do app só roda no Claude Desktop.') }) : null),
             ),
           ),
         ),

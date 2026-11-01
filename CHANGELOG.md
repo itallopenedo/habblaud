@@ -14,8 +14,8 @@ do meio (0.**3**.0).
 
 - **Botões do Claude Desktop respondem pelo escritório.** A caixa de próximos passos manda hoje só o rótulo de cada
   botão; o Habblaud exigia um texto à parte e recusava a escolha. Agora o rótulo é a resposta, como no Claude Desktop.
-  Botões que disparam ações do app (commit, PR, comentários) continuam só no Claude Desktop: no escritório eles
-  aparecem desabilitados, com o aviso “Ação do Claude Desktop: escolha por lá”, em vez de dar erro ao clicar.
+  Botões marcados como ação do app (commit, PR, comentários) também respondem pelo escritório, com o texto do botão;
+  a ação do app em si só roda no Claude Desktop, e o cartão avisa isso embaixo do botão.
 - **Perguntas do Codex aparecem em “precisam de você”.** Quando o Codex pergunta (`request_user_input`), o agente
   fica esperando você, com a pergunta e as opções, até a sua resposta. O aviso de que a pergunta foi aceita não
   encerra mais a espera, as ferramentas que o Codex roda enquanto espera (como `sleep`) não o devolvem a “trabalhando”

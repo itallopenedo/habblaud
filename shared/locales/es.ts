@@ -261,7 +261,7 @@ export const ES: Readonly<Record<string, string>> = {
   "ao Claude Desktop": "Claude Desktop",
   "Escolha uma opção abaixo para responder ao Claude Desktop.": "Elige una opción abajo para responder a Claude Desktop.",
   "Responda no Codex: no terminal, ⇧← abre a pergunta.": "Responde en Codex: en la terminal, ⇧← abre la pregunta.",
-  "Ação do Claude Desktop: escolha por lá.": "Acción de Claude Desktop: elígela allí.",
+  "Daqui vai o texto do botão; a ação do app só roda no Claude Desktop.": "Desde aquí se envía el texto del botón; la acción de la app solo se ejecuta en Claude Desktop.",
   "a pergunta mudou ou a opção não está mais disponível: atualize o escritório": "la pregunta cambió o la opción ya no está disponible: actualiza la oficina",
   "esta resposta já foi enviada: aguarde a sessão receber": "esta respuesta ya se envió: espera a que la sesión la reciba",
   "Vá {0} em {1} para responder{2}": "Ve a {0} en {1} para responder{2}",
