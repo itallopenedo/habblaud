@@ -20,6 +20,9 @@ do meio (0.**3**.0).
   fica esperando você, com a pergunta e as opções, até a sua resposta. O aviso de que a pergunta foi aceita não
   encerra mais a espera, as ferramentas que o Codex roda enquanto espera (como `sleep`) não o devolvem a “trabalhando”
   e uma pergunta que o Codex recusa não fica presa.
+- **Codex morto no meio de uma pergunta não fica “esperando você”.** Sem sinal de vida por 10 min, a pergunta deixa de
+  contar. O cartão das perguntas do Codex mostra as opções e como responder (⇧← no terminal do Codex): responder pelo
+  escritório não é possível, porque o Codex só lê mensagens novas quando o turno termina.
 
 ### Adicionado
 
@@ -27,6 +30,9 @@ do meio (0.**3**.0).
   no tooltip.
 - **`npm run upstream:sync` (fork):** traz a versão nova do upstream para o `meu-habblaud` num worktree temporário,
   roda os checks e nunca faz push. Ver `FORK.md`.
+- **Avisos de travado e de erro no iPhone:** o `scripts/phone-notify.mjs` também avisa quando um agente fica trabalhando
+  sem novidade por mais de 15 min (`HABBLAUD_STUCK_MIN`; não conta comandos do Claude Code ainda rodando em segundo
+  plano nem agentes esperando um subagente) e quando para com erro. Texto genérico, como o aviso de espera.
 
 ## [1.0.4] - 2026-10-27
 

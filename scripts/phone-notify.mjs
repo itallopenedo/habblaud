@@ -11,6 +11,7 @@ const home = join(homedir(), '.habblaud');
 export async function createNotifier({
   configPath = join(home, 'iphone-access.json'), statePath = join(home, 'phone-notify-state.json'),
   fetchImpl = fetch, now = Date.now, log = console.log,
+  stuckMs = ((m) => (m > 0 ? m : 15) * 60000)(Number(process.env.HABBLAUD_STUCK_MIN)),
 } = {}) {
   const { topic, url } = JSON.parse(await readFile(configPath, 'utf8'));
   const click = new URL(url);
@@ -55,15 +56,35 @@ export async function createNotifier({
             || typeof agent.id !== 'string' || !agent.id || typeof agent.sessionId !== 'string'
             || !['working', 'waiting', 'idle', 'shell', 'done', 'offline'].includes(agent.status)
             || (agent.permission != null && typeof agent.permission.id !== 'string')
-            || (agent.activity != null && typeof agent.activity.id !== 'string')
+            || (agent.activity != null && (typeof agent.activity.id !== 'string'
+              || (agent.activity.error != null && typeof agent.activity.error !== 'boolean')))
+            || (agent.lastEventAt != null && typeof agent.lastEventAt !== 'number')
             || (agent.waitingFor != null && typeof agent.waitingFor !== 'string'))) throw new Error('Snapshot inválido.');
-        const pending = new Set(snapshot.agents.filter((agent) => agent.status === 'waiting').map((agent) =>
-          createHash('sha256').update(JSON.stringify([agent.id, agent.sessionId,
-            agent.permission?.id || agent.activity?.id || agent.waitingFor || 'waiting'])).digest('hex')));
+        const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+        const waiting = snapshot.agents.filter((agent) => agent.status === 'waiting');
+        // Quem espera um subagente em andamento fica 'working' com o lastEventAt parado: não é travado.
+        const waitingOnChild = new Set(snapshot.agents
+          .filter((child) => child.parentId && ['working', 'waiting', 'shell'].includes(child.status))
+          .map((child) => child.parentId));
+        const stuck = snapshot.agents.filter((agent) => agent.status === 'working' && !agent.shells?.length
+          && !waitingOnChild.has(agent.id) && now() - agent.lastEventAt > stuckMs);
+        const errors = snapshot.agents.filter((agent) => !['working', 'waiting'].includes(agent.status)
+          && agent.activity?.error === true);
+        const pending = new Set([
+          ...waiting.map((agent) => key(agent.id, agent.sessionId,
+            agent.permission?.id || agent.activity?.id || agent.waitingFor || 'waiting')),
+          ...stuck.map((agent) => key('stuck', agent.id, agent.sessionId, agent.lastEventAt)),
+          ...errors.map((agent) => key('error', agent.id, agent.sessionId, agent.activity.id)),
+        ]);
         const kept = new Set([...delivered].filter((key) => pending.has(key)));
         const hasNew = [...pending].some((key) => !delivered.has(key));
         if (hasNew && now() >= retryAt) {
-          await send(`Há ${pending.size} agentes aguardando sua resposta. Abra o Habblaud.`);
+          const parts = [
+            waiting.length && `${waiting.length} agentes aguardando sua resposta`,
+            stuck.length && `${stuck.length} agentes sem novidade há mais de ${Math.round(stuckMs / 60000)} min`,
+            errors.length && `${errors.length} agentes parados com erro`,
+          ].filter(Boolean);
+          await send(`Há ${parts.join(', ')}. Abra o Habblaud.`);
           await persist(pending);
           failures = 0; retryAt = 0;
           log(`Notificação enviada (${pending.size}).`);
