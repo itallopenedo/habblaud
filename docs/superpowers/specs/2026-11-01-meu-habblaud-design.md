@@ -114,8 +114,9 @@ interativo abre no Mac, reinício do Mac sobe o serviço sozinho. Rollback: `lau
 
 **C2. Terminal interativo no iPhone, só pela tailnet.**
 
-- Terceiro listener em `127.0.0.1:4749` (`HABBLAUD_TAILNET_PORT`), sem exposição na LAN; `tailscale serve` publica
-  esse listener em vez da 4748 para o terminal (a 4748 continua para o restante).
+- Terceiro listener em `127.0.0.1:4749` (`HABBLAUD_TAILNET_PORT`), HTTP só em loopback, sem exposição na LAN; o TLS
+  fica com o `tailscale serve`, que publica esse listener numa segunda porta HTTPS da tailnet
+  (`tailscale serve --bg --https=8443 http://127.0.0.1:4749`). A 443 da tailnet continua apontando para a 4748.
 - Requisição nesse listener precisa de: login remoto válido; cabeçalho `Tailscale-User-Login` igual a
   `HABBLAUD_TAILNET_USER` (o `tailscale serve` remove o enviado pelo cliente e põe o verdadeiro); capacidade nova
   `pty` em `HABBLAUD_REMOTE_ALLOW`.
@@ -135,8 +136,9 @@ Integração pelo mecanismo oficial do Hermes (Event Hooks / Observer Hooks), se
   resultados (o grupo PND tem dados de terceiros). Fila em memória, envio assíncrono, timeout de 2 s, descarta na
   falha: o Hermes nunca espera o Habblaud.
 - **Transporte:** VPS entra na tailnet (OK do Itallo, com backup e rollback: desligar o plugin e sair da tailnet).
-- **Habblaud:** `POST /api/hermes/events` no listener da tailnet, com token Bearer (hash no `.env`), corpo até
-  64 KB, validação do formato. `HermesSource` (contrato `AgentSource`) cria um agente por sessão ativa; ocioso após
+- **Habblaud:** `POST /api/hermes/events` no listener da tailnet. A VPS é um nó da tailnet sem login de usuário,
+  então essa rota é a única do listener que não pede login nem `Tailscale-User-Login`: exige token Bearer (só o hash
+  no `.env`), corpo até 64 KB e validação do formato. Qualquer outra rota segue as regras do C2. `HermesSource` (contrato `AgentSource`) cria um agente por sessão ativa; ocioso após
   inatividade; `offline` em `on_session_end`. Provider novo `hermes` em `shared/types.ts`, excluído do Habblaud World.
 - Check: testes da rota (token errado → 401, corpo inválido → 400) e da fonte (sessão abre, ferramenta vira
   atividade, fim fecha); teste do plugin com servidor falso (timeout não bloqueia); caso real com uma mensagem no
