@@ -16,6 +16,7 @@ import { setQuiet } from '../log';
 import { startFakeWorld, type FakeWorld } from '../test/fake-world';
 import { tempDir } from '../test/fixtures';
 import { WorldSettingsStore } from './settings';
+import { resolveWorldTheme } from './theme';
 import { backoffDelay, BuildingUplink, type UplinkTimers, type UplinkTiming } from './uplink';
 
 setQuiet(true);
@@ -405,10 +406,13 @@ describe('BuildingUplink: conexão e remessas', () => {
     const h = await start({ tokensVisible: false });
     await waitFor(() => h.world.ws.uplinks.length === 1, 'primeira');
     expect(h.world.ws.uplinks[0].uplink.tokens).toBeUndefined();
-    h.store.setTheme('christmas');
+    // Um tema diferente do automático de hoje: de 1º/11 a 26/12 o automático já é o Natal, e trocar para ele não muda
+    // o pacote (nada a reenviar).
+    const theme = resolveWorldTheme('auto', new Date()) === 'christmas' ? 'halloween' : 'christmas';
+    h.store.setTheme(theme);
     h.uplink.themeChanged();
     await waitFor(() => h.world.ws.uplinks.length === 2, 'tema');
-    expect(h.world.ws.uplinks[1].uplink.theme).toBe('christmas');
+    expect(h.world.ws.uplinks[1].uplink.theme).toBe(theme);
   });
 
   it('welcome.building: andares e agentes do mundo até a primeira remessa daqui', async () => {
