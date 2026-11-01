@@ -578,10 +578,12 @@ class AgentView {
       const replyable = !!a.activity?.questions?.some((q) => q.options.some((o) => !o.appOnly));
       setText(this.alertText, a.activity?.tool === 'mcp__ccd_turn__wrap_up' && replyable && !!a.canMessage && access().messages
         ? tr('Escolha uma opção abaixo para responder ao Claude Desktop.')
-        : tr('Vá {0} em {1} para responder{2}', [where, room?.name ?? tr('seu projeto'), a.waitingFor ? `: ${a.waitingFor}` : '.']));
+        : codex && a.activity?.kind === 'ask'
+          ? tr('Responda no Codex: no terminal, ⇧← abre a pergunta.')
+          : tr('Vá {0} em {1} para responder{2}', [where, room?.name ?? tr('seu projeto'), a.waitingFor ? `: ${a.waitingFor}` : '.']));
     }
-    // Perguntas do AskUserQuestion (só leitura): o Codex não pergunta pelo escritório.
-    const asking = waiting && !codex && a.activity?.kind === 'ask' ? a.activity : undefined;
+    // Perguntas (só leitura fora do Claude Desktop): o Codex mostra as opções, mas só se responde no terminal dele.
+    const asking = waiting && a.activity?.kind === 'ask' ? a.activity : undefined;
     this.renderQuestions(asking);
     // Sem o pedido no escritório: dá para responder por aqui com o plugin (só com a trava local, como o cartão). O Codex
     // não responde perguntas pelo escritório.
