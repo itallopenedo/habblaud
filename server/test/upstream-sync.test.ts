@@ -1,11 +1,11 @@
 // scripts/upstream-sync.ts: a main anda só por fast-forward, o merge acontece num worktree temporário e o branch
 // próprio nunca anda com conflito, check vermelho ou mudança não commitada.
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, execSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { parseSyncArgs, upstreamSync, type SyncOptions } from '../../scripts/upstream-sync';
+import { parseSyncArgs, recoveryHint, upstreamSync, type SyncOptions } from '../../scripts/upstream-sync';
 
 // Git isolado da configuração do Mac (assinatura de commit, identidade, hooks globais).
 const GIT_ENV = {
@@ -121,6 +121,41 @@ describe('upstreamSync', () => {
     commit(up, 'b.txt', 'novo\n');
     expect(upstreamSync(opts())).toMatchObject({ status: 'refused', reason: expect.stringMatching(/não commitadas/) });
     expect(sh(repo, 'rev-parse', 'origin/main')).not.toBe(sh(up, 'rev-parse', 'main'));
+  });
+});
+
+describe('recoveryHint', () => {
+  it('branch em uso num worktree: faz o ff nesse worktree e remove o worktree temporário', () => {
+    const { root, repo, opts } = setup();
+    const wt = join(root, 'meu');
+    sh(repo, 'worktree', 'add', '-q', wt, 'meu-habblaud');
+    const hint = recoveryHint(repo, 'meu-habblaud', opts().worktreeDir);
+    expect(hint).toContain(`-C ${realpathSync(wt)} merge --ff-only`);
+    expect(hint).toContain(`worktree remove ${opts().worktreeDir}`);
+  });
+
+  it('branch sem worktree em uso: branch -f', () => {
+    const { repo, opts } = setup();
+    const hint = recoveryHint(repo, 'meu-habblaud', opts().worktreeDir);
+    expect(hint).toContain('branch -f meu-habblaud');
+  });
+
+  it('ponta a ponta: resolver e commitar no worktree, rodar a dica, e meu-habblaud traz os dois lados', () => {
+    const { up, repo, opts } = setup();
+    sh(repo, 'switch', '-q', 'meu-habblaud');
+    commit(repo, 'a.txt', 'meu um\n');
+    sh(repo, 'switch', '-q', 'main');
+    commit(up, 'a.txt', 'deles um\n');
+    const r = upstreamSync(opts());
+    if (r.status !== 'conflict') throw new Error(`esperava conflito, veio ${r.status}`);
+    writeFileSync(join(r.worktree, 'a.txt'), 'resolvido\n');
+    sh(r.worktree, 'add', 'a.txt');
+    sh(r.worktree, 'commit', '--no-edit');
+    execSync(recoveryHint(repo, 'meu-habblaud', r.worktree), { shell: '/bin/sh', cwd: repo, stdio: 'ignore' });
+    expect(sh(repo, 'show', 'meu-habblaud:mine.txt')).toBe('meu');
+    expect(sh(repo, 'show', 'meu-habblaud:a.txt')).toBe('resolvido');
+    expect(sh(repo, 'rev-list', '--parents', '-n1', 'meu-habblaud').split(' ')).toHaveLength(3);
+    expect(existsSync(r.worktree)).toBe(false);
   });
 });
 

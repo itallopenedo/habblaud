@@ -109,16 +109,24 @@ export function parseSyncArgs(argv: string[]): { branch: string; checks: boolean
   return args;
 }
 
-function summary(r: SyncResult, branch: string): string {
+/** Comandos que levam o merge commitado no worktree para `branch` e removem o worktree. Lidos depois do commit. */
+export function recoveryHint(repo: string, branch: string, worktree: string): string {
+  const sha = `$(git -C ${worktree} rev-parse HEAD)`;
+  const at = checkedOutAt(repo, branch);
+  const bring = at ? `git -C ${at} merge --ff-only ${sha}` : `git -C ${repo} branch -f ${branch} ${sha}`;
+  return `${bring} && git -C ${repo} worktree remove ${worktree}`;
+}
+
+function summary(r: SyncResult, branch: string, repo: string): string {
   switch (r.status) {
     case 'up-to-date':
       return `✓ ${branch} já tem tudo do upstream.`;
     case 'merged':
       return `✓ ${branch}: ${r.from.slice(0, 7)} → ${r.to.slice(0, 7)}. Confira e, se quiser, git push fork ${branch}.`;
     case 'conflict':
-      return `✗ Conflito em ${r.files.join(', ')}. Resolva em ${r.worktree}, commite lá e rode de novo.`;
+      return `✗ Conflito em ${r.files.join(', ')}. Resolva em ${r.worktree} e commite lá (git -C ${r.worktree} commit --no-edit). Depois: ${recoveryHint(repo, branch, r.worktree)}`;
     case 'checks-failed':
-      return `✗ O check "${r.check}" falhou depois do merge. O merge está em ${r.worktree}; ${branch} não mudou.`;
+      return `✗ O check "${r.check}" falhou depois do merge; ${branch} não mudou. Corrija e commite em ${r.worktree}, rode os checks lá e depois: ${recoveryHint(repo, branch, r.worktree)}`;
     case 'refused':
       return `✗ Nada feito: ${r.reason}.`;
   }
@@ -138,7 +146,7 @@ function main(argv: string[]): void {
     checks: args.checks ? DEFAULT_CHECKS : [],
     worktreeDir: join(tmpdir(), `habblaud-sync-${Date.now()}`),
   });
-  console.log(summary(r, args.branch));
+  console.log(summary(r, args.branch, ROOT));
   if (r.status !== 'merged' && r.status !== 'up-to-date') process.exitCode = 1;
 }
 
