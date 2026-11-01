@@ -260,6 +260,7 @@ export const EN: Readonly<Record<string, string>> = {
   "ao terminal da {0}": "the {0} terminal",
   "ao Claude Desktop": "Claude Desktop",
   "Escolha uma opção abaixo para responder ao Claude Desktop.": "Choose an option below to reply to Claude Desktop.",
+  "Ação do Claude Desktop: escolha por lá.": "Claude Desktop action: choose it there.",
   "a pergunta mudou ou a opção não está mais disponível: atualize o escritório": "the question changed or the option is no longer available: refresh the office",
   "esta resposta já foi enviada: aguarde a sessão receber": "this reply has already been sent: wait for the session to receive it",
   "Vá {0} em {1} para responder{2}": "Go to {0} in {1} to reply{2}",

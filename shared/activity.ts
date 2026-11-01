@@ -30,7 +30,7 @@ function askQuestions(raw: unknown): AskQuestion[] {
       const label = clean(o.label, 80);
       if (!label) return [];
       const description = clean(o.description, 200);
-      return [{ index, label, ...(description ? { description } : {}) }];
+      return [{ index, label, ...(description ? { description } : {}), ...(o.action !== undefined ? { appOnly: true as const } : {}) }];
     });
     const header = clean(q.header, 30);
     return [{ index, question, ...(header ? { header } : {}), ...(q.multiSelect === true ? { multiSelect: true } : {}), options }];
