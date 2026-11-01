@@ -10,6 +10,19 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+### Corrigido
+
+- **Perguntas do Codex aparecem em “precisam de você”.** Quando o Codex pergunta (`request_user_input`), o agente
+  fica esperando você, com a pergunta e as opções, até a sua resposta. O aviso de que a pergunta foi aceita não
+  encerra mais a espera.
+
+### Adicionado
+
+- **Uso do Fable no cartão da conta:** tokens de hoje e dos últimos 7 dias (entrada + saída), com o detalhe por tipo
+  no tooltip.
+- **`npm run upstream:sync` (fork):** traz a versão nova do upstream para o `meu-habblaud` num worktree temporário,
+  roda os checks e nunca faz push. Ver `FORK.md`.
+
 ## [1.0.4] - 2026-10-27
 
 ### Corrigido
