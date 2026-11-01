@@ -10,7 +10,7 @@ import { NameStore } from '../../model/names';
 import { Office } from '../../model/office';
 import { codexHome, R, SOURCES, threadId } from '../../test/codex-fixtures';
 import { MAX_LINE_BYTES } from '../tail';
-import { CodexSource, scanPrefix } from './source';
+import { CodexSource, QUESTION_QUIET_MS, scanPrefix } from './source';
 
 setQuiet(true);
 
@@ -489,6 +489,27 @@ describe('fonte do Codex: eventos de hook', () => {
     ctx.advance(1_000);
     ctx.hook(ev('PreToolUse', { tool_name: 'sleep', tool_use_id: 's3', tool_input: {} }));
     expect(ctx.agent()?.status).toBe('working');
+  });
+
+  it('pergunta aberta sem sinal de vida por QUESTION_QUIET_MS deixa de contar como espera', () => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('UserPromptSubmit', { prompt: 'me pergunte' }));
+    const q = { questions: [{ title: 'Qual cor?', options: ['Azul', 'Verde'] }] };
+    ctx.home.rollout(T, [
+      R.meta(T, { at: ctx.now() - 5_000, cwd: '/projetos/api' }),
+      R.taskStarted('turn1', ctx.now() - 4_000),
+      R.functionCall('q1', 'request_user_input_async', q, ctx.now() - 3_000),
+      R.functionOutput('q1', '{"accepted":true}', ctx.now() - 2_000),
+    ]);
+    ctx.home.lock(T, ctx.now() - 5_000);
+    ctx.advance(3_100);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('waiting');
+    // O processo morreu: nenhum hook, nenhuma escrita. O lock fica.
+    ctx.advance(QUESTION_QUIET_MS + 1_000);
+    ctx.poll();
+    expect(ctx.agent()?.status).not.toBe('waiting');
   });
 
   it('apply_patch e MCP: as mesmas atividades do Claude Code', () => {

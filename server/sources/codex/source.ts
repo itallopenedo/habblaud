@@ -63,6 +63,8 @@ export const SESSION_END_GRACE_MS = 5_000;
 const CLOSE_AFTER_MISSING_MS = 1_500;
 /** 'working' sem nenhuma escrita no rollout nem evento de hook por este tempo: o turno morreu (crash). */
 export const WORKING_QUIET_MS = 30 * 60_000;
+/** Pergunta aberta sem hook nem escrita no rollout por este tempo: o Codex morreu esperando (lock órfão), não espera mais. */
+export const QUESTION_QUIET_MS = 10 * 60_000;
 /** Sem eventos de turno (legacy antigo): escreveu há pouco = trabalhando. */
 const LEGACY_WORKING_MS = 90_000;
 /** Atividades recuperadas do começo de um rollout grande para a linha do tempo longa. */
@@ -607,7 +609,7 @@ export class CodexSource implements AgentSource, CodexLive {
     const s = t.state;
     const at = s.lastAt ?? 0;
     // Pergunta sem resposta: o agente espera você, mesmo com o turno aberto e com hooks mais novos que o rollout.
-    if (s.questions.size) {
+    if (this.asking(t, this.now())) {
       if (t.status !== 'waiting') {
         t.status = 'waiting';
         t.waitingFor = tr('responder uma pergunta');
@@ -683,7 +685,7 @@ export class CodexSource implements AgentSource, CodexLive {
   private decide(t: ThreadTracker, status: AgentStatus, at: number, waitingFor: string | undefined, live: boolean): void {
     if (at < t.statusAt) return;
     // Pergunta aberta no rollout: os hooks da espera (o Codex chama `sleep`) e o fim do turno não tiram o 'waiting'.
-    if (status !== 'waiting' && t.state.questions.size) {
+    if (status !== 'waiting' && this.asking(t, at)) {
       status = 'waiting';
       waitingFor = tr('responder uma pergunta');
     }
@@ -694,8 +696,19 @@ export class CodexSource implements AgentSource, CodexLive {
     if (live) this.statusToOffice(t);
   }
 
+  /** Pergunta aberta e o Codex ainda dando sinal de vida (hooks e escritas do `sleep` da espera). */
+  private asking(t: ThreadTracker, now: number): boolean {
+    if (!t.state.questions.size) return false;
+    return now - Math.max(t.lastWriteAt ?? 0, t.lastHookAt ?? 0, t.state.lastAt ?? 0) < QUESTION_QUIET_MS;
+  }
+
   /** 'working' sem nenhuma notícia por muito tempo (turno morto num crash): vira 'idle'. */
   private quietCheck(t: ThreadTracker, now: number): void {
+    // Espera por pergunta de um Codex que parou de dar sinal (processo morto, lock órfão): deixa de esperar.
+    if (t.status === 'waiting' && t.state.questions.size && !this.asking(t, now)) {
+      this.decide(t, 'idle', now, undefined, true);
+      return;
+    }
     if (t.status !== 'working') return;
     const last = Math.max(t.lastWriteAt ?? 0, t.lastHookAt ?? 0, t.statusAt);
     if (now - last > WORKING_QUIET_MS) this.decide(t, 'idle', now, undefined, true);
