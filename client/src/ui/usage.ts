@@ -7,10 +7,10 @@
 // Conta do Codex: os números vêm dos arquivos de sessão dele, que só se renovam enquanto alguma sessão roda; por isso
 // a idade ("há 12 min") fica sempre à mostra. Sem cota nem créditos ("sem cota") nunca vira 0%. Não há o que
 // instalar para o uso: "Como funciona" abre a ajuda na seção do Codex. Sem Opus/Sonnet nem e-mail (só o plano).
-import type { AccountInfo } from '../../../shared/types';
+import type { AccountInfo, TokenTotals } from '../../../shared/types';
 import type { UiContext } from './context';
 import { h, KeyedList, setAttr, setHidden, setStyleVar, setText, setTitle, setVariant } from './dom';
-import { FIVE_HOURS_MS, relativeTime, usageLevel, usageWindowView, WEEK_MS, type UsageWindowView } from './format';
+import { FIVE_HOURS_MS, formatTokens, relativeTime, usageLevel, usageWindowView, WEEK_MS, type UsageWindowView } from './format';
 import { ICONS } from './icons';
 import { isCodex } from './provider';
 import { usageRowFits } from './usage-row';
@@ -68,6 +68,7 @@ interface CardRefs {
   state: HTMLElement;
   stateText: HTMLElement;
   meters: HTMLElement;
+  fable: HTMLElement;
   five: Meter;
   week: Meter;
   msg: HTMLElement;
@@ -84,6 +85,17 @@ interface CardRefs {
 }
 
 let tipSeq = 0;
+
+/** Entrada + saída: o total do Fable no cartão (o cache é só detalhe no tooltip). */
+function inOutTokens(t: TokenTotals): number {
+  return t.input + t.output;
+}
+
+/** Detalhe por tipo, para o tooltip: "12,3 k tokens (entrada 2 · saída 10 · cache 1,1 k)". */
+function fableDetail(t: TokenTotals): string {
+  const cache = t.cacheWrite + t.cacheRead;
+  return `${formatTokens(inOutTokens(t))} ${tr('tokens')} (${tr('entrada')} ${formatTokens(t.input)} · ${tr('saída')} ${formatTokens(t.output)} · ${tr('cache')} ${formatTokens(cache)})`;
+}
 
 function createMeter(long: string, short: string, title: string): Meter {
   const bar = h('span', { class: 'ui-meter__bar' }, h('span', { class: 'ui-meter__fill' }));
@@ -299,12 +311,13 @@ export class UsageCards {
     const tipNote = h('p', { class: 'ui-usage-tip__note' });
     const tipSetup = h('div', { class: 'ui-usage-tip__setup' }, h('p', { class: 'ui-usage-tip__setup-title', text: tr('Como ter o uso ao vivo') }), createUsageSetup());
     const tip = h('div', { class: 'ui-usage-tip', role: 'tooltip', attrs: { id: tipId } }, tipTitle, tipRows, tipNote, tipSetup);
+    const fable = h('p', { class: 'ui-usage-card__fable', hidden: true });
     const card = h(
       'div',
       { class: 'ui-usage-card', tabIndex: 0, attrs: { 'aria-describedby': tipId } },
       chip,
       flag,
-      h('div', { class: 'ui-usage-card__body' }, h('div', { class: 'ui-usage-card__head' }, name, prov, email, state), meters, msg),
+      h('div', { class: 'ui-usage-card__body' }, h('div', { class: 'ui-usage-card__head' }, name, prov, email, state), meters, fable, msg),
       tip,
     );
     this.refs.set(card, {
@@ -316,6 +329,7 @@ export class UsageCards {
       state,
       stateText,
       meters,
+      fable,
       five,
       week,
       msg,
@@ -356,6 +370,9 @@ export class UsageCards {
       updateMeter(r.week, week, tr('Semana'));
     }
     r.meters.classList.toggle('is-dim', state !== 'ok');
+    // Fable: sem % (não tem limite semanal), só o total de tokens de hoje e dos últimos 7 dias.
+    setHidden(r.fable, !a.fable);
+    if (a.fable) setText(r.fable, tr('Fable: {0} hoje · {1} em 7 dias', [formatTokens(inOutTokens(a.fable.today)), formatTokens(inOutTokens(a.fable.week))]));
 
     // Idade dos números antigos no cabeçalho (no celular, um selo no chip faz esse papel). No Codex a idade fica
     // sempre à mostra (os números só se renovam enquanto alguma sessão roda), discreta enquanto são recentes.
@@ -410,6 +427,10 @@ export class UsageCards {
       const sonnet = codex ? null : usageWindowView(u.sevenDaySonnet, u.fetchedAt, now, WEEK_MS);
       if (opus) rows.push([tr('Opus (semana)'), opus.summary]);
       if (sonnet) rows.push([tr('Sonnet (semana)'), sonnet.summary]);
+    }
+    if (a.fable) {
+      rows.push([tr('Fable hoje'), fableDetail(a.fable.today)]);
+      rows.push([tr('Fable 7 dias'), fableDetail(a.fable.week)]);
     }
     if (u && state === 'noquota') rows.push([tr('Cota'), tr('sem cota nem créditos agora')]);
     if (u && (state !== 'empty' || codex)) {

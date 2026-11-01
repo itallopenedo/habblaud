@@ -4,10 +4,11 @@
 // As contas do Claude Code saem dos config dirs (detectAccounts). As de outras ferramentas (Codex) chegam de fora,
 // descobertas pela fonte delas (setProviderAccounts), com ids únicos entre todas as contas; o uso delas também é
 // empurrado pela fonte (setUsage), ao lado do statusline e do cache do /usage do Claude Code.
-import { basename, resolve } from 'node:path';
-import type { AccountInfo, AccountUsage, Provider } from '../../shared/types';
+import { basename, join, resolve } from 'node:path';
+import type { AccountInfo, AccountUsage, FableUsage, Provider } from '../../shared/types';
 import { log } from '../log';
 import { detectAccounts, type DetectedAccount } from './detect';
+import { FableUsageReader } from './fable';
 import { StatuslineUsageReader, type StatuslineUsage } from './statusline';
 import { usageFromCache, UsageStore, type UsageSource, type UsageView } from './usage';
 import { tr } from '../../shared/i18n';
@@ -55,6 +56,9 @@ export class AccountsService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private statuslineTimer: ReturnType<typeof setInterval> | null = null;
   private readonly statusline: StatuslineUsageReader | null;
+  private readonly fableReader = new FableUsageReader();
+  /** Uso do Fable por conta (tokens, sem %), relido junto com os metadados. */
+  private fable = new Map<string, FableUsage>();
   /** Assinatura do uso exibido (o status muda sozinho com o tempo: ok -> stale, janelas reiniciam). */
   private usageSig = '';
   private readonly now: () => number;
@@ -84,6 +88,13 @@ export class AccountsService {
       if (cache) changed = this.usage.set(e.id, cache) || changed;
       else changed = this.usage.clear(e.id, 'cache') || changed;
     }
+    const fableBefore = JSON.stringify([...this.fable]);
+    this.fable = new Map();
+    for (const e of next) {
+      const f = this.fableReader.read(join(e.dir, 'projects'), this.now());
+      if (f) this.fable.set(e.id, f);
+    }
+    if (JSON.stringify([...this.fable]) !== fableBefore) changed = true;
     if (this.usageViewChanged()) changed = true;
     if (changed) this.opts.onChange();
   }
@@ -244,6 +255,8 @@ export class AccountsService {
       if (d.organization) info.organization = d.organization;
       if (d.plan) info.plan = d.plan;
       if (view.usage) info.usage = view.usage;
+      const fable = this.fable.get(e.id);
+      if (fable) info.fable = fable;
       return info;
     });
   }
