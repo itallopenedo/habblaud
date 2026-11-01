@@ -310,6 +310,16 @@ export function planTasks(args: Rec): TaskItem[] | undefined {
 /** Perguntas ao usuário do Codex: a chamada fica sem resultado até a resposta (o agente espera você). */
 export const QUESTION_TOOLS = new Set<string>(['request_user_input', 'request_user_input_async']);
 
+/** Resultado `{"accepted": true}` de request_user_input_async: a pergunta foi mostrada e segue esperando a resposta. */
+function acceptedOutput(output: unknown): boolean {
+  if (typeof output !== 'string') return false;
+  try {
+    return rec(JSON.parse(output))?.accepted === true;
+  } catch {
+    return false;
+  }
+}
+
 /** `questions: [{title, options: [texto]}]` do Codex, no formato do AskUserQuestion (question, options: {label}). */
 function codexQuestions(input: Rec): Rec[] {
   const qs = Array.isArray(input.questions) ? input.questions : [];
@@ -916,6 +926,11 @@ class RolloutLineParser {
         const callId = str(p.call_id);
         const name = callId ? this.s.pending.get(callId) : undefined;
         if (callId) this.s.pending.delete(callId);
+        // Pergunta recusada (erro em vez de {accepted}) ou respondida na própria chamada (request_user_input): fecha.
+        if (callId && this.s.questions.has(callId) && !acceptedOutput(p.output)) {
+          this.s.questions.delete(callId);
+          this.out.signals.push({ type: 'question', open: this.s.questions.size > 0 });
+        }
         if (this.paginated()) return;
         // Legacy: o resultado de um comando (o item concluído não existe nesse formato).
         if (!name || !/^(shell|shell_command|local_shell|exec_command|container\.exec)$/.test(name)) return;

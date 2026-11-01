@@ -38,4 +38,17 @@ describe('rollout do Codex: pergunta ao usuário', () => {
     expect(answered.results.flatMap((r) => r.activities.map((a) => a.activity.text))).toContain('Recebeu a sua resposta');
     expect(answered.state.questions.size).toBe(0);
   });
+
+  it('pergunta recusada pelo Codex (erro em vez de {accepted}) não fica aberta', () => {
+    const at = Date.parse('2026-11-01T17:55:00Z');
+    const open = feed([
+      R.meta(T, { at }),
+      R.taskStarted('turn1', at + 1),
+      R.functionCall('c0', 'request_user_input', { questions: [{ title: 'Qual cor?', options: ['Azul', 'Verde'] }] }, at + 2),
+    ]);
+    expect(open.state.questions.has('c0')).toBe(true);
+    const refused = feed([R.functionOutput('c0', 'request_user_input is unavailable in Default mode', at + 3)], open.state);
+    expect(refused.state.questions.size).toBe(0);
+    expect(refused.results.flatMap((r) => r.signals)).toContainEqual({ type: 'question', open: false });
+  });
 });

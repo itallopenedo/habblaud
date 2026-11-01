@@ -606,14 +606,16 @@ export class CodexSource implements AgentSource, CodexLive {
   private settleStatus(t: ThreadTracker): void {
     const s = t.state;
     const at = s.lastAt ?? 0;
-    if (at < t.statusAt) return;
-    // Pergunta sem resposta: o agente espera você, mesmo com o turno aberto.
+    // Pergunta sem resposta: o agente espera você, mesmo com o turno aberto e com hooks mais novos que o rollout.
     if (s.questions.size) {
-      t.status = 'waiting';
-      t.statusAt = at;
-      t.waitingFor = tr('responder uma pergunta');
+      if (t.status !== 'waiting') {
+        t.status = 'waiting';
+        t.waitingFor = tr('responder uma pergunta');
+      }
+      t.statusAt = Math.max(t.statusAt, at);
       return;
     }
+    if (at < t.statusAt) return;
     let status: AgentStatus;
     if (s.turnOpen !== undefined) status = s.turnOpen ? 'working' : 'idle';
     else status = s.lastAt !== undefined && this.now() - s.lastAt < LEGACY_WORKING_MS ? 'working' : 'idle';
@@ -680,6 +682,11 @@ export class CodexSource implements AgentSource, CodexLive {
    */
   private decide(t: ThreadTracker, status: AgentStatus, at: number, waitingFor: string | undefined, live: boolean): void {
     if (at < t.statusAt) return;
+    // Pergunta aberta no rollout: os hooks da espera (o Codex chama `sleep`) e o fim do turno não tiram o 'waiting'.
+    if (status !== 'waiting' && t.state.questions.size) {
+      status = 'waiting';
+      waitingFor = tr('responder uma pergunta');
+    }
     t.statusAt = at;
     t.status = status;
     if (waitingFor) t.waitingFor = waitingFor;

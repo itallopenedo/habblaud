@@ -457,6 +457,40 @@ describe('fonte do Codex: eventos de hook', () => {
     expect(ctx.agent()?.status).toBe('idle');
   });
 
+  it('pergunta aberta (request_user_input_async): os hooks das ferramentas da espera não tiram o waiting', () => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('UserPromptSubmit', { prompt: 'me pergunte a cor' }));
+    const q = { questions: [{ title: 'Qual cor?', options: ['Azul', 'Verde'] }] };
+    const path = ctx.home.rollout(T, [
+      R.meta(T, { at: ctx.now() - 5_000, cwd: '/projetos/api' }),
+      R.taskStarted('turn1', ctx.now() - 4_000),
+      R.functionCall('q1', 'request_user_input_async', q, ctx.now() - 3_000),
+      R.functionOutput('q1', '{"accepted":true}', ctx.now() - 2_000),
+    ]);
+    ctx.home.lock(T, ctx.now() - 5_000);
+    ctx.advance(3_100);
+    ctx.poll();
+    expect(ctx.agent()).toMatchObject({ status: 'waiting', waitingFor: 'responder uma pergunta' });
+    // O Codex espera a resposta chamando `sleep`: os hooks chegam depois do rollout e não podem virar 'working'.
+    ctx.advance(1_000);
+    ctx.hook(ev('PreToolUse', { tool_name: 'sleep', tool_use_id: 's1', tool_input: {} }));
+    ctx.hook(ev('PostToolUse', { tool_name: 'sleep', tool_use_id: 's1', tool_input: {}, tool_response: {} }));
+    expect(ctx.agent()).toMatchObject({ status: 'waiting', waitingFor: 'responder uma pergunta' });
+    ctx.home.append(path, [R.functionCall('s2', 'sleep', {}, ctx.now()), R.functionOutput('s2', 'ok', ctx.now())]);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('waiting');
+    // A resposta (mensagem com o call_id) fecha a pergunta e o turno segue.
+    ctx.advance(1_000);
+    const reply = `<send_user_message_question_reply>\n[{"questionItemId":"[\\"request_user_input_async\\",\\"q1\\",0]","answer":"Azul"}]`;
+    ctx.home.append(path, [R.message('user', reply, ctx.now())]);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('working');
+    ctx.advance(1_000);
+    ctx.hook(ev('PreToolUse', { tool_name: 'sleep', tool_use_id: 's3', tool_input: {} }));
+    expect(ctx.agent()?.status).toBe('working');
+  });
+
   it('apply_patch e MCP: as mesmas atividades do Claude Code', () => {
     const ctx = setup();
     ctx.source.boot();
