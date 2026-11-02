@@ -254,6 +254,7 @@ export class PtyPanel implements UiComponent, PtyControl {
       );
       this.screen.append(this.pane.el);
       this.screen.after(this.pane.keys.el);
+      setHidden(this.pane.keys.el, this.el.classList.contains('is-away'));
       return this.pane;
     });
     return this.loading;

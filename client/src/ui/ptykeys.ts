@@ -30,9 +30,29 @@ export function keyboardInset(innerHeight: number, vv: { height: number; offsetT
   return vv ? Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop)) : 0;
 }
 
+/** Ctrl de um toque: arma, vale para a próxima tecla e desarma. */
+export class CtrlLatch {
+  private armed = false;
+
+  toggle(): boolean {
+    return (this.armed = !this.armed);
+  }
+
+  /** Consome: true se estava armado (e desarma). */
+  take(): boolean {
+    const was = this.armed;
+    this.armed = false;
+    return was;
+  }
+
+  reset(): boolean {
+    return (this.armed = false);
+  }
+}
+
 export class PtyKeys {
   readonly el: HTMLElement;
-  private ctrl = false;
+  private readonly latch = new CtrlLatch();
   private readonly ctrlBtn: HTMLButtonElement;
 
   constructor(
@@ -40,8 +60,12 @@ export class PtyKeys {
     private readonly appCursor: () => boolean,
     private readonly refocus: () => void,
   ) {
-    const key = (label: string, aria: string, k: PtyKey) => this.button(label, aria, () => this.send(keySequence(k, this.appCursor())));
-    this.ctrlBtn = this.button('Ctrl', tr('Ctrl: a próxima tecla vai com Ctrl'), () => this.setCtrl(!this.ctrl));
+    const key = (label: string, aria: string, k: PtyKey) =>
+      this.button(label, aria, () => {
+        this.reset(); // Ctrl, ↑, c não vira Ctrl+C: tecla da barra desarma o Ctrl
+        this.send(keySequence(k, this.appCursor()));
+      });
+    this.ctrlBtn = this.button('Ctrl', tr('Ctrl: a próxima tecla vai com Ctrl'), () => this.show(this.latch.toggle()));
     this.ctrlBtn.setAttribute('aria-pressed', 'false');
     this.el = h(
       'div',
@@ -58,13 +82,17 @@ export class PtyKeys {
 
   /** O que foi digitado, com o Ctrl armado aplicado (e desarmado). */
   apply(data: string): string {
-    if (!this.ctrl) return data;
-    this.setCtrl(false);
+    if (!this.latch.take()) return data;
+    this.show(false);
     return withCtrl(data);
   }
 
-  private setCtrl(on: boolean): void {
-    this.ctrl = on;
+  /** Desarma o Ctrl (troca de sessão, janela fechada): ele não vaza para outro terminal. */
+  reset(): void {
+    this.show(this.latch.reset());
+  }
+
+  private show(on: boolean): void {
     this.ctrlBtn.classList.toggle('is-on', on);
     this.ctrlBtn.setAttribute('aria-pressed', String(on));
   }
@@ -72,7 +100,7 @@ export class PtyKeys {
   private button(label: string, aria: string, act: () => void): HTMLButtonElement {
     const b = h('button', { class: 'ui-pty__key', type: 'button', text: label, attrs: { 'aria-label': aria } });
     // Sem tirar o foco do terminal: o teclado do iPhone não fecha a cada toque.
-    b.addEventListener('pointerdown', (e) => e.preventDefault());
+    for (const ev of ['pointerdown', 'mousedown', 'touchstart']) b.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
     b.addEventListener('click', () => {
       act();
       this.refocus();

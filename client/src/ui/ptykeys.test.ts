@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { keyboardInset, keySequence, withCtrl } from './ptykeys';
+import { CtrlLatch, keyboardInset, keySequence, withCtrl } from './ptykeys';
 
 describe('teclas do terminal no celular', () => {
   it('Esc, Tab e setas (normal e "application cursor")', () => {
@@ -30,5 +30,18 @@ describe('teclas do terminal no celular', () => {
     expect(keyboardInset(800, { height: 500, offsetTop: 20 })).toBe(280);
     expect(keyboardInset(800, { height: 800, offsetTop: 0 })).toBe(0);
     expect(keyboardInset(800, null)).toBe(0);
+  });
+
+  it('Ctrl armado: vale para uma tecla só, e desarma ao zerar', () => {
+    const l = new CtrlLatch();
+    expect(l.take()).toBe(false);
+    expect(l.toggle()).toBe(true);
+    expect(l.take()).toBe(true);
+    expect(l.take()).toBe(false);
+    l.toggle();
+    expect(l.reset()).toBe(false);
+    expect(l.take()).toBe(false);
+    expect(l.toggle()).toBe(true);
+    expect(l.toggle()).toBe(false);
   });
 });

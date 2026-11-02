@@ -93,6 +93,7 @@ export class PtyPane {
   }
 
   detach(): void {
+    this.keys.reset();
     this.es?.close();
     this.es = null;
     this.id = null;
