@@ -42,7 +42,7 @@ export function parseHermesBatch(raw: unknown): HermesEvent[] {
 function parseEvent(raw: unknown): HermesEvent {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) bad('objeto');
   const e = raw as Record<string, unknown>;
-  for (const k of Object.keys(e)) if (!KEYS.has(k)) bad(k);
+  for (const k of Object.keys(e)) if (!KEYS.has(k)) bad(k.slice(0, 40));
   const { profile, platform, session, event, tool, ok, duration_ms: duration, at, model } = e;
   if (typeof profile !== 'string' || !PROFILE.test(profile)) bad('profile');
   if (typeof session !== 'string' || !SESSION.test(session)) bad('session');
@@ -85,7 +85,7 @@ export class FixedWindowLimiter {
 
   take(): boolean {
     const t = this.now();
-    if (t - this.start >= this.windowMs) {
+    if (t < this.start || t - this.start >= this.windowMs) {
       this.start = t;
       this.n = 0;
     }
@@ -112,6 +112,8 @@ export function createHermesIngest(o: HermesIngestOptions): (req: IncomingMessag
     if (url.pathname !== HERMES_EVENTS_PATH) return false;
     const refuse = (status: number, error: string, headers: Record<string, string> = {}) => {
       req.resume();
+      // O cliente recusado não pode continuar mandando corpo na mesma conexão.
+      res.setHeader('Connection', 'close');
       for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
       sendJson(res, status, { error });
     };

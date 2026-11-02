@@ -11,5 +11,5 @@ export function parseHermesTokenHash(raw: string | undefined): Buffer | undefine
 /** `Authorization: Bearer <token>` com a sha256 igual a `hash` (comparação em tempo constante). */
 export function bearerMatches(header: string | undefined, hash: Buffer): boolean {
   const m = /^Bearer ([A-Za-z0-9_-]{32,128})$/.exec(header ?? '');
-  return !!m && timingSafeEqual(createHash('sha256').update(m[1]).digest(), hash);
+  return !!m && hash.length === 32 && timingSafeEqual(createHash('sha256').update(m[1]).digest(), hash);
 }

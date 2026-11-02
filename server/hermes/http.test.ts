@@ -32,6 +32,9 @@ describe('token do Hermes', () => {
     expect(parseHermesTokenHash(` SHA256:${HASH.toString('hex').toUpperCase()} `)).toEqual(HASH);
     for (const raw of [undefined, '', HASH.toString('hex'), 'sha256:abc', `scrypt:${HASH.toString('hex')}`]) expect(parseHermesTokenHash(raw), String(raw)).toBeUndefined();
   });
+  it('hash com tamanho errado: false, sem lançar', () => {
+    expect(bearerMatches(`Bearer ${TOKEN}`, HASH.subarray(0, 31))).toBe(false);
+  });
   it('Bearer: o token certo passa; errado, ausente, curto ou sem "Bearer" não', () => {
     expect(bearerMatches(`Bearer ${TOKEN}`, HASH)).toBe(true);
     for (const h of [undefined, '', TOKEN, `Bearer ${TOKEN}x`, `bearer ${TOKEN}`, 'Bearer curto', `Bearer ${TOKEN} `]) expect(bearerMatches(h, HASH), String(h)).toBe(false);
@@ -53,6 +56,14 @@ describe('parseHermesBatch', () => {
   it('recusa (400) qualquer chave a mais: texto de mensagem, argumentos, resultado, comando, remetente', () => {
     for (const k of ['user_message', 'assistant_response', 'args', 'result', 'command', 'sender_id', 'session_id', 'description']) {
       expect(status400({ v: 1, events: [{ ...EV, [k]: 'CANARIO' }] }), k).toBe(400);
+    }
+  });
+  it('chave a mais: __proto__ é 400 e o nome ecoado é cortado em 40 caracteres', () => {
+    expect(status400(JSON.parse(`{"v":1,"events":[{"__proto__":{"x":1},"profile":"a","session":"0123456789abcdef","event":"pre_tool_call","at":1800000000000}]}`))).toBe(400);
+    try {
+      parseHermesBatch({ v: 1, events: [{ ...EV, ['k'.repeat(500)]: 1 }] });
+    } catch (err) {
+      expect((err as HttpError).message.length).toBeLessThan(150);
     }
   });
   it('recusa (400) campo fora do formato', () => {
@@ -83,6 +94,13 @@ describe('FixedWindowLimiter', () => {
     const l = new FixedWindowLimiter(2, 1000, () => t);
     expect([l.take(), l.take(), l.take()]).toEqual([true, true, false]);
     t = 1000;
+    expect(l.take()).toBe(true);
+  });
+  it('relógio que volta: a janela reinicia em vez de congelar', () => {
+    let t = 10_000;
+    const l = new FixedWindowLimiter(1, 1000, () => t);
+    expect([l.take(), l.take()]).toEqual([true, false]);
+    t = 5_000;
     expect(l.take()).toBe(true);
   });
 });
@@ -129,6 +147,15 @@ describe('createHermesIngest', () => {
     const get = await s.post(undefined, {}, '/api/hermes/events', 'GET');
     expect(get.status).toBe(405);
     expect(get.headers.get('allow')).toBe('POST');
+    expect(s.applied).toEqual([]);
+  });
+  it('token errado vence 415 e 413: 401, sem ler o corpo; recusa fecha a conexão', async () => {
+    const s = await serve();
+    const wrong = { Authorization: 'Bearer '.padEnd(50, 'y') };
+    expect((await s.post({ v: 1, events: [EV] }, { ...wrong, 'Content-Type': 'text/plain' })).status).toBe(401);
+    const big = await s.post({ v: 1, events: [EV], pad: 'x'.repeat(70 * 1024) }, wrong);
+    expect(big.status).toBe(401);
+    expect(big.headers.get('connection')).toBe('close');
     expect(s.applied).toEqual([]);
   });
   it('outro caminho (mesmo variante): não é da rota (segue para o login)', async () => {
