@@ -131,6 +131,7 @@ pacote inteiro se aparecer qualquer campo fora da lista.
 | Coisas da máquina | Nome do computador, usuário do sistema, fuso horário. O dispositivo aparece só como "Dispositivo 1/2/3" |
 | O seu histórico | Estatísticas do Meu dia, a linha do tempo do timelapse, o histórico de sessões |
 | Agentes do modo demonstração | Ficam de fora antes de montar o pacote |
+| Agentes do Hermes (o agente da VPS que o Habblaud só acompanha) | Ficam de fora antes de montar o pacote: o mundo só conhece `claude` e `codex` |
 
 ## Ao vivo, sem identificar ninguém
 

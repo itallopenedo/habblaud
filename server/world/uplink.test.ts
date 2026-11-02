@@ -237,6 +237,28 @@ describe('BuildingUplink: conexão e remessas', () => {
     expect(h.changes.n).toBeGreaterThan(0);
   });
 
+  it('Hermes nunca sobe: o pacote é o mesmo do escritório sem ele, e mudança só nele não manda nada', async () => {
+    const h = await start({ start: false });
+    h.agents.push(
+      agent('hermes:0123456789abcdef', 'hermes:/Íon', { provider: 'hermes', status: 'working' }),
+      agent('hermes:fedcba9876543210', '/Users/ana/outro', { provider: 'hermes', status: 'waiting' }),
+    );
+    h.uplink.start();
+    await waitFor(() => h.world.ws.uplinks.length === 1, 'primeira remessa');
+    const { uplink } = h.world.ws.uplinks[0];
+    expect(validate(uplink)).toEqual([]);
+    expect(uplink.floors).toHaveLength(2);
+    expect(agentsOf(uplink).map((a) => a.provider).sort()).toEqual(['claude', 'claude', 'codex']);
+    expect(JSON.stringify(uplink).toLowerCase()).not.toContain('hermes');
+    expect(h.uplink.lastUplink()!.uplink).toEqual(uplink);
+    // Só o Hermes mudou (status e entrou mais um): o pacote é igual, nada sai.
+    h.agents[4] = { ...h.agents[4], status: 'idle' };
+    h.agents.push(agent('hermes:00000000000000aa', 'hermes:/guedola', { provider: 'hermes' }));
+    h.change();
+    await sleep((FAST.debounceMs ?? 0) + (FAST.minGapMs ?? 0) + 150);
+    expect(h.world.ws.uplinks).toHaveLength(1);
+  });
+
   it('última remessa em disco: modo 600, sem token, relida só na mesma sessão', async () => {
     const h = await start();
     await waitFor(() => !!h.uplink.lastUplink()?.ack, 'ack');

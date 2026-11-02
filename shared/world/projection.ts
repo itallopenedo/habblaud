@@ -17,7 +17,8 @@
 // DOM): recebe só os ids das salas, os agentes, o tema já resolvido, a versão, os tokens do prédio e as opções do
 // jogador, e devolve o pacote. O uplink (server/world/uplink.ts) só manda o que sai daqui.
 // - Um andar por sala com pelo menos um agente presente; um agente por principal ou subagente trabalhando, esperando,
-//   à toa ou de olho num shell. Demonstração (`demo:`) nunca entra.
+//   à toa ou de olho num shell. Demonstração (`demo:`) nunca entra, nem agente de ferramenta que não é do mundo
+//   (só `claude` e `codex`: o Hermes, que roda numa VPS, fica de fora).
 // - Ids do mundo vêm de `WorldIdSource` (aleatórios, server/world/ids.ts): nunca o id do escritório, o caminho da
 //   pasta, a conta ou o pid. Andares e agentes saem ordenados pelo id do mundo (a ordem de chegada não vaza).
 // - Nome sorteado do pool (`pickName`) pelo id do mundo, do mesmo look e sem repetir no pacote; o nome do escritório,
@@ -76,6 +77,12 @@ export interface ProjectionResult {
 export const WORLD_STATUSES: readonly WorldAgentStatus[] = ['working', 'waiting', 'idle', 'shell'];
 
 const isWorldStatus = (s: string): s is WorldAgentStatus => (WORLD_STATUSES as readonly string[]).includes(s);
+
+/**
+ * Ferramentas que existem no mundo (o `provider` do schema.json). Agente de outra ferramenta (o Hermes, que roda numa
+ * VPS e não neste computador) fica de fora: mandá-lo como `claude` seria um agente que não existe aqui.
+ */
+const WORLD_PROVIDERS: ReadonlySet<string> = new Set<WorldAgent['provider']>(['claude', 'codex']);
 
 /** Faixa das tarefas concluídas no dia: 0, 1–2, 3–5, 6+ → 0..3. */
 export function tasksBand(n: number): 0 | 1 | 2 | 3 {
@@ -140,6 +147,7 @@ export function projectWithReport(input: ProjectionInput, ids: WorldIdSource, no
   for (const a of input.agents) {
     if (isDemoId(a.id) || isDemoId(a.roomId) || !roomIds.has(a.roomId)) continue;
     if ((a.kind !== 'main' && a.kind !== 'sub') || !isWorldStatus(a.status)) continue;
+    if (!WORLD_PROVIDERS.has(a.provider ?? 'claude')) continue;
     const list = byRoom.get(a.roomId);
     if (list) list.push(a);
     else byRoom.set(a.roomId, [a]);
