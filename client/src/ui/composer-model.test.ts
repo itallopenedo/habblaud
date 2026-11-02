@@ -16,6 +16,7 @@ import {
   messageText,
   PLUGIN_HINT,
   pickAttachments,
+  transferFiles,
   pollDelay,
   sendStatusText,
   staleAttachmentIds,
@@ -168,5 +169,16 @@ describe('caixa de mensagem (peças puras)', () => {
   it('anexos: ids já enviados só se perdem quando o servidor diz que o anexo não vale (400)', () => {
     expect(staleAttachmentIds(400)).toBe(true);
     for (const s of [undefined, 403, 404, 409, 429, 500]) expect(staleAttachmentIds(s)).toBe(false);
+  });
+
+  it('colar ou arrastar: qualquer tipo de arquivo; usa `files` e, sem ele, os itens do tipo arquivo; texto puro não vira anexo', () => {
+    const foto = new File(['x'], 'image.png', { type: 'image/png' });
+    const video = new File(['y'], 'video.mov', { type: 'video/quicktime' });
+    const pdf = new File(['z'], 'nota.pdf', { type: 'application/pdf' });
+    expect(transferFiles({ files: [foto, video], items: [] })).toEqual([foto, video]);
+    const item = (f: File | null, kind = 'file') => ({ kind, getAsFile: () => f });
+    expect(transferFiles({ files: [], items: [item(pdf), item(null, 'string'), item(null)] })).toEqual([pdf]);
+    expect(transferFiles({ files: [], items: [item(null, 'string')] })).toEqual([]);
+    expect(transferFiles(null)).toEqual([]);
   });
 });

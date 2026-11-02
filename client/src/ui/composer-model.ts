@@ -68,6 +68,22 @@ export function attachmentProblem(f: { name: string; size: number }, count: numb
 }
 
 /** Quais arquivos de uma seleção entram (índices) e o primeiro motivo de recusa; passou do limite, o resto não entra. */
+/**
+ * Arquivos de um colar ou de um arrastar (foto, vídeo, PDF, áudio, qualquer tipo): `files` quando o navegador o
+ * preenche; senão os itens do tipo arquivo (o Safari do iPhone às vezes só entrega `items`). Texto não vira anexo.
+ */
+export function transferFiles(
+  data: { files?: ArrayLike<File> | null; items?: ArrayLike<{ kind: string; getAsFile(): File | null }> | null } | null,
+): File[] {
+  if (!data) return [];
+  const files = Array.from(data.files ?? []);
+  if (files.length) return files;
+  return Array.from(data.items ?? []).flatMap((i) => {
+    const f = i.kind === 'file' ? i.getAsFile() : null;
+    return f ? [f] : [];
+  });
+}
+
 export function pickAttachments(list: { name: string; size: number }[], count: number): { accepted: number[]; problem: string | undefined } {
   const accepted: number[] = [];
   let problem: string | undefined;

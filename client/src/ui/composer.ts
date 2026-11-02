@@ -22,6 +22,7 @@ import {
   POLL_LIMIT_MS,
   pickAttachments,
   pollDelay,
+  transferFiles,
   sendStatusText,
   staleAttachmentIds,
   timeoutError,
@@ -112,6 +113,14 @@ export class MessageComposer {
     });
     this.box.addEventListener('focus', () => this.resize());
     this.box.addEventListener('keydown', (e) => this.onKey(e));
+    // Colar (⌘V no Mac, "Colar" no iPhone) qualquer arquivo vira anexo, como o clipe. O texto que vier junto cola
+    // normalmente; só um colar sem texto deixa de ir para a caixa.
+    this.box.addEventListener('paste', (e) => {
+      const files = transferFiles(e.clipboardData);
+      if (!files.length || this.attachBtn.hidden) return;
+      if (!e.clipboardData?.types.includes('text/plain')) e.preventDefault();
+      this.addFiles(files);
+    });
     this.sendBtn = h(
       'button',
       {
@@ -153,6 +162,16 @@ export class MessageComposer {
     this.status = h('p', { class: 'ui-msg__status', role: 'status', hidden: true, attrs: { 'aria-live': 'polite' } });
     this.tip = term ? null : h('p', { class: 'ui-msg__tip', text: composerTip() });
     this.el = h('div', { class: `ui-msg ui-msg--${variant}` }, this.hint, this.row, this.fileList, this.fileNote, this.fileInput, this.dictStatus, this.status, this.tip);
+    // Arrastar arquivos do Finder para a caixa também anexa.
+    this.el.addEventListener('dragover', (e) => {
+      if (!this.attachBtn.hidden && e.dataTransfer?.types.includes('Files')) e.preventDefault();
+    });
+    this.el.addEventListener('drop', (e) => {
+      const files = transferFiles(e.dataTransfer);
+      if (!files.length || this.attachBtn.hidden) return;
+      e.preventDefault();
+      this.addFiles(files);
+    });
   }
 
   /**

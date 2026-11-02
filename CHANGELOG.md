@@ -27,7 +27,8 @@ do meio (0.**3**.0).
 ### Adicionado
 
 - **Foto ou arquivo na mensagem.** A caixa de mensagem (na gaveta e no terminal) ganhou o clipe: no iPhone, câmera,
-  fotos ou arquivos. Os arquivos vão para `~/.habblaud/attachments` no Mac (no Docker, gravados pelo
+  fotos ou arquivos. Também dá para colar (⌘V no Mac, "Colar" no iPhone) ou arrastar qualquer arquivo para a caixa:
+  foto, vídeo, PDF, áudio. Os arquivos vão para `~/.habblaud/attachments` no Mac (no Docker, gravados pelo
   `npm run codex:bridge`) e a mensagem leva os caminhos, para o Claude Code e para o Codex. Até 8 anexos de 15 MB por
   mensagem; vale a trava das mensagens (`messages` no acesso pelo celular).
 - **Imagens na conversa do terminal.** Prints e fotos da conversa (coladas no prompt ou no resultado de uma
