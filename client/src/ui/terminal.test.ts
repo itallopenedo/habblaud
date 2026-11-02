@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentInfo, ShellJob, TerminalEntry } from '../../../shared/types';
 import {
   diffLineKind,
+  entryImages,
   entryKey,
   footerGlyph,
   entryTimeTitle,
@@ -19,6 +20,7 @@ import {
   splitToolTitle,
   TerminalLog,
   terminalFooter,
+  terminalImageUrl,
   terminalUrl,
 } from './terminal';
 
@@ -283,5 +285,17 @@ describe('rodapé do Codex', () => {
     expect(footerGlyph('working', 'codex')).toBe('•');
     expect(footerGlyph('waiting', 'codex')).toBe('✋');
     expect(footerGlyph('ended', 'claude')).toBe('■');
+  });
+});
+
+describe('imagens do terminal', () => {
+  it('terminalImageUrl codifica o stream e o id', () => {
+    expect(terminalImageUrl('session:acc:s1', 'u-1:i0')).toBe('/api/terminal/image/session%3Aacc%3As1/u-1%3Ai0');
+  });
+
+  it('entryImages: só referências válidas, até 10', () => {
+    expect(entryImages({})).toEqual([]);
+    expect(entryImages({ images: [{ id: 'a', mime: 'image/png' }, { id: 1, mime: 'image/png' }, { id: 'b', mime: 'text/html' }, null] })).toEqual([{ id: 'a', mime: 'image/png' }]);
+    expect(entryImages({ images: Array.from({ length: 12 }, (_, i) => ({ id: `i${i}`, mime: 'image/jpeg' })) })).toHaveLength(10);
   });
 });

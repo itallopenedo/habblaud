@@ -26,6 +26,10 @@ do meio (0.**3**.0).
 
 ### Adicionado
 
+- **Imagens na conversa do terminal.** Prints e fotos da conversa (coladas no prompt ou no resultado de uma
+  ferramenta, como uma captura de tela) aparecem como miniaturas no terminal; um toque abre a imagem grande. A imagem
+  só é buscada quando aparece (`GET /api/terminal/image`), com a mesma trava do terminal; o terminal do Codex continua
+  com "[imagem]".
 - **Uso do Fable no cartão da conta:** tokens de hoje e dos últimos 7 dias (entrada + saída), com o detalhe por tipo
   no tooltip.
 - **`npm run upstream:sync` (fork):** traz a versão nova do upstream para o `meu-habblaud` num worktree temporário,

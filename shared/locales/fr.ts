@@ -3306,4 +3306,7 @@ export const FR: Readonly<Record<string, string>> = {
 
   // Fase 4 — mídia
   "imagem indisponível: abra o terminal de novo": "image indisponible : rouvrez le terminal",
+  "Imagem {0}": "Image {0}",
+  "Ampliar a imagem {0}": "Agrandir l'image {0}",
+  "Imagem da conversa": "Image de la conversation",
 };
