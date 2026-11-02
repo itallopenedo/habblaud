@@ -55,7 +55,11 @@ export interface AgentFilesOptions {
   roots?: readonly string[];
 }
 
-const within = (path: string, dir: string): boolean => !!dir && path.startsWith(`${dir.replace(/\/+$/, '')}/`);
+/** `path` está dentro de `dir`? Pasta vazia ou a raiz "/" não contam: liberariam o disco inteiro. */
+const within = (path: string, dir: string): boolean => {
+  const d = dir.trim().replace(/\/+$/, '');
+  return !!d && path.startsWith(`${d}/`);
+};
 
 export class AgentFiles {
   private readonly ids = new Map<string, Map<string, string>>();
@@ -86,7 +90,7 @@ export class AgentFiles {
     for (const f of writtenFiles(lines)) {
       if (out.length >= MAX_AGENT_FILES) break;
       const type = fileType(f.path);
-      if (!type || pathProblem(f.path)) continue;
+      if (!type || pathProblem(f.path) || !this.allows(agentId, f.path)) continue;
       const id = createHash('sha256').update(`${agentId}|${f.path}`).digest('hex').slice(0, 20);
       ids.set(id, f.path);
       const rel = cwd && f.path.startsWith(`${cwd}/`) ? f.path.slice(cwd.length + 1) : f.path;

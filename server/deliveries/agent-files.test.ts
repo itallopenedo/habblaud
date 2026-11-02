@@ -39,7 +39,7 @@ describe('aba Arquivos: o que o agente escreveu', () => {
         wrote('/p/loja/docs/relatorio.md', T0 + 5),
         wrote('/tmp/print.png', T0 + 6),
       ]);
-      const files = new AgentFiles({ transcriptPathOf: (id) => (id === 'a1' ? file : undefined), cwdOf: () => '/p/loja' });
+      const files = new AgentFiles({ transcriptPathOf: (id) => (id === 'a1' ? file : undefined), cwdOf: () => '/p/loja', roots: ['/tmp'] });
       const list = files.list('a1')!;
       expect(list.map((f) => [f.name, f.path, f.kind, f.at])).toEqual([
         ['print.png', '/tmp/print.png', 'image', T0 + 6],
@@ -106,6 +106,27 @@ describe('aba Arquivos: o que o agente escreveu', () => {
       expect(files.allows('a1', join(link, 'docs', 'a.md'))).toBe(true);
       expect(files.allows('a1', join(realpathSync(real), 'docs', 'a.md'))).toBe(true);
       expect(files.allows('a1', join(tmp.dir, 'fora.md'))).toBe(false);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it('allows: pasta raiz ou vazia não libera o disco inteiro', () => {
+    for (const cwd of ['/', '//', '', '   ']) {
+      const files = new AgentFiles({ transcriptPathOf: () => undefined, cwdOf: () => cwd });
+      expect(files.allows('a1', '/Users/voce/Documents/contrato.pdf')).toBe(false);
+    }
+    // Uma raiz "/" configurada também não vale.
+    expect(new AgentFiles({ transcriptPathOf: () => undefined, cwdOf: () => undefined, roots: ['/'] }).allows('a1', '/etc/x.md')).toBe(false);
+  });
+
+  it('list: não mostra o que o 403 recusaria ao abrir (fora da pasta do agente e das raízes)', () => {
+    const tmp = tempDir();
+    try {
+      const file = join(tmp.dir, 't.jsonl');
+      writeLines(file, [wrote('/p/loja/docs/relatorio.md', T0), wrote('/p/outro/segredo.md', T0 + 1), wrote('/tmp/print.png', T0 + 2)]);
+      const files = new AgentFiles({ transcriptPathOf: () => file, cwdOf: () => '/p/loja', roots: ['/tmp'] });
+      expect(files.list('a1')!.map((f) => f.name)).toEqual(['print.png', 'relatorio.md']);
     } finally {
       tmp.cleanup();
     }
