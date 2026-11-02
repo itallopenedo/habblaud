@@ -101,6 +101,7 @@ export class HermesSource implements AgentSource {
 
   /** Sem boot: o Hermes não deixa nada para reler; a sessão aparece no próximo evento dela. */
   start(): void {
+    if (this.timer) return;
     this.timer = setInterval(() => this.tick(), this.o.tickMs ?? 10_000);
     this.timer.unref?.();
   }
@@ -124,7 +125,7 @@ export class HermesSource implements AgentSource {
       try {
         this.applyOne(ev);
       } catch (err) {
-        log.warnOnce(`hermes-event:${errMsg(err)}`, tr('Eventos do Hermes: falha ao aplicar um evento ({0}).', [errMsg(err)]));
+        log.warnOnce('hermes-event', tr('Eventos do Hermes: falha ao aplicar um evento ({0}).', [errMsg(err)]));
       }
     }
   }
@@ -149,6 +150,8 @@ export class HermesSource implements AgentSource {
       office.closeMain(id);
       return;
     }
+    // Fim de conversa tardio de sessão fechada (ou nunca vista): não cria nem revive o agente.
+    if ((ev.event === 'post_llm_call' || ev.event === 'on_session_end') && !this.sessions.has(ev.session)) return;
     const s = this.ensure(ev, id);
     switch (ev.event) {
       case 'pre_llm_call':
@@ -161,6 +164,8 @@ export class HermesSource implements AgentSource {
         if (ev.tool) this.activity(id, ev, describeHermesTool(ev.tool), ev.tool);
         break;
       case 'post_tool_call':
+        // Ferramenta mais longa que HERMES_QUIET_MS: o tick pôs à toa no meio do turno; nunca tira de "waiting".
+        if (office.get(id)?.status === 'idle') office.setStatus(id, 'working');
         if (ev.ok === false) this.activity(id, ev, SPECIAL.error(ev.tool), ev.tool);
         break;
       case 'pre_approval_request':

@@ -74,6 +74,28 @@ describe('HermesSource', () => {
     expect(source.sources()[0].sessions).toBe(0);
   });
 
+  it('ferramenta mais longa que o silêncio: o tick põe à toa, o post_tool_call devolve a "trabalhando" (e nunca tira de "precisa de você")', () => {
+    const { clock, office, source, ev } = setup();
+    source.apply([ev('pre_tool_call', { tool: 'terminal' })]);
+    clock.t += HERMES_QUIET_MS;
+    source.tick();
+    expect(office.get(ID)!.status).toBe('idle');
+    source.apply([ev('post_tool_call', { tool: 'terminal', ok: true })]);
+    expect(office.get(ID)!.status).toBe('working');
+    source.apply([ev('pre_approval_request'), ev('post_tool_call', { tool: 'terminal', ok: true })]);
+    expect(office.get(ID)!.status).toBe('waiting');
+  });
+
+  it('evento tardio (post_llm_call, on_session_end) de sessão fechada ou desconhecida não cria nem revive o agente', () => {
+    const { office, source, ev } = setup();
+    source.apply([ev('post_llm_call'), ev('on_session_end')]);
+    expect(office.get(ID)).toBeUndefined();
+    source.apply([ev('pre_llm_call'), ev('on_session_finalize')]);
+    source.apply([ev('post_llm_call'), ev('on_session_end')]);
+    expect(office.get(ID)!.status).toBe('offline');
+    expect(source.sources()[0].sessions).toBe(0);
+  });
+
   it('horário da VPS adiantado não põe atividade no futuro', () => {
     const { clock, office, source, ev } = setup();
     source.apply([ev('pre_tool_call', { tool: 'patch', at: clock.t + 60_000 })]);
