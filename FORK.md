@@ -80,6 +80,12 @@ outros ficam em `/root/.hermes/profiles/<nome>`):
     $HH/habblaud-observer.json                                # {"url", "token", "profile"}, modo 600
     $HH/config.yaml                                           # "- habblaud-observer" em plugins.enabled (backup antes)
 
+O arquivo precisa ser só do dono (`chmod 600`): com permissão de grupo ou de outros o plugin o recusa e não registra
+nada. `HABBLAUD_OBSERVER_CONFIG` (outro caminho para o JSON) vale para o processo inteiro, ou seja, para todos os perfis
+do gateway: existe só para os testes; em produção cada perfil usa o seu `<HERMES_HOME>/habblaud-observer.json`. O plugin
+junta os eventos por até 1 s (até 50 por requisição), porque o Habblaud tem um freio único de 60 requisições por 10 s
+para todos os perfis, e não usa proxy nem segue redirecionamento.
+
 Depois, reiniciar o gateway do jeito que as notas do Hermes mandam (sem turno em andamento). Desligar: tirar a linha
 de `plugins.enabled` (o backup é `config.yaml.bak-habblaud-*`), reiniciar o gateway e apagar a pasta do plugin e o
 JSON. Testes do plugin: `python3 -m unittest discover -s integrations/hermes`. Agentes do Hermes nunca vão ao Habblaud

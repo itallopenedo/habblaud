@@ -6,13 +6,15 @@ de mensagem (user_message, assistant_response), argumentos ou resultados de ferr
 aprovação nem ids de quem falou (sender_id): o grupo da PND tem dados de terceiros.
 
 Nunca atrapalha o Hermes: o gancho só põe o evento numa fila em memória (até 500; cheia, descarta) e volta na hora,
-sempre com None (não injeta contexto nem bloqueia ferramenta). Uma thread em segundo plano junta até 50 eventos por
-requisição, com timeout de 2 s, e descarta o lote se der errado. Um erro inesperado no gancho desliga o plugin até o
+sempre com None (não injeta contexto nem bloqueia ferramenta). Uma thread em segundo plano junta, por até 1 s depois do
+primeiro evento, no máximo 50 eventos por requisição (o Habblaud tem um freio único de 60 requisições por 10 s para
+todos os perfis), com timeout de 2 s, sem proxy e sem seguir redirecionamento, e descarta o lote se der errado. Um erro inesperado no gancho desliga o plugin até o
 próximo restart do gateway.
 
 Configuração: <HERMES_HOME>/habblaud-observer.json (modo 600), {"url": "https://<mac>.ts.net:8443/api/hermes/events",
 "token": "<token>", "profile": "Íon"}; sem ela (ou inválida), o plugin não registra nada. "profile" é opcional (o
-padrão é o nome da pasta do perfil, ou "default").
+padrão é o nome da pasta do perfil, ou "default"). O arquivo precisa ser só do dono (sem permissão de grupo/outros), senão
+o plugin o recusa.
 """
 
 import hashlib
@@ -23,6 +25,7 @@ import queue
 import re
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -45,12 +48,22 @@ APPROVAL_HOOKS = ("pre_approval_request", "post_approval_response")
 QUEUE_MAX = 500
 BATCH_MAX = 50
 TIMEOUT_S = 2.0
+BATCH_WINDOW_S = 1.0
 # Os mesmos formatos que o Habblaud confere (server/hermes/http.ts): um campo fora deles derrubaria o lote inteiro.
 PLATFORM_RE = re.compile(r"[a-z0-9_-]{1,20}")
 TOOL_RE = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 MODEL_RE = re.compile(r"[A-Za-z0-9._:/@+-]{1,80}")
 TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{32,128}")
 LOCAL_HTTP_RE = re.compile(r"http://(127\.0\.0\.1|localhost)(:\d+)?/")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_args, **_kwargs):
+        return None  # redirecionamento = HTTPError = lote descartado; o token nunca vai para outro endereço
+
+
+# Sem proxy (nem o do ambiente) e sem redirecionamento: o token só vai para a URL da configuração.
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
 
 def _str(value, pattern):
@@ -68,17 +81,21 @@ def _profile_ok(value):
 
 
 class Observer:
-    def __init__(self, url, token, profile, timeout=TIMEOUT_S, queue_max=QUEUE_MAX):
+    def __init__(self, url, token, profile, timeout=TIMEOUT_S, queue_max=QUEUE_MAX, batch_window=BATCH_WINDOW_S):
         self.url = url
         self.token = token
         self.profile = profile
         self.timeout = timeout
+        self.batch_window = batch_window
         self.q = queue.Queue(maxsize=queue_max)
         self.disabled = False
         self.dropped = 0
         self.sent = 0
-        # Aprovação sem session_id: a sessão da última ferramenta que começou nesta mesma thread.
-        self._session_of_thread = {}
+        # Aprovação sem session_id: primeiro o tool_call_id da ferramenta que pediu, depois a sessão da última
+        # ferramenta que começou nesta mesma thread. Os dois mapas andam juntos sob o mesmo lock.
+        self._lock = threading.Lock()
+        self._tool_sessions = {}  # tool_call_id -> session_id (de pre_tool_call até post_tool_call)
+        self._session_of_thread = {}  # thread -> session_id
         self._worker = threading.Thread(target=self._run, name="habblaud-observer", daemon=True)
         self._worker.start()
 
@@ -102,17 +119,24 @@ class Observer:
     def build(self, name, kw):
         thread = threading.get_ident()
         sid = kw.get("session_id")
-        if name in APPROVAL_HOOKS and not sid:
-            sid = self._session_of_thread.get(thread)
+        call_id = kw.get("tool_call_id")
+        call_id = call_id if isinstance(call_id, str) and call_id else None
+        with self._lock:
+            if name in APPROVAL_HOOKS and not sid:
+                sid = self._tool_sessions.get(call_id) or self._session_of_thread.get(thread)
+            if name == "post_tool_call" and call_id:
+                self._tool_sessions.pop(call_id, None)
+            if isinstance(sid, str) and sid:
+                if name == "pre_tool_call":
+                    self._session_of_thread[thread] = sid
+                    if call_id:
+                        self._tool_sessions[call_id] = sid
+                elif name in END_HOOKS:
+                    self._tool_sessions = {c: s for c, s in self._tool_sessions.items() if s != sid}
+                    self._session_of_thread = {t: s for t, s in self._session_of_thread.items() if s != sid}
         if not isinstance(sid, str) or not sid:
             return None
-        if name == "pre_tool_call":
-            self._session_of_thread[thread] = sid
-        elif name in END_HOOKS:
-            for t, s in list(self._session_of_thread.items()):
-                if s == sid:
-                    self._session_of_thread.pop(t, None)
-        digest = hashlib.sha256(f"{self.profile}\0{sid}".encode("utf-8")).hexdigest()[:16]
+        digest = hashlib.sha256(f"{self.profile}\0{sid}".encode("utf-8", "surrogatepass")).hexdigest()[:16]
         event = {"profile": self.profile, "session": digest, "event": name, "at": int(time.time() * 1000)}
         platform = kw.get("platform")
         if isinstance(platform, str) and PLATFORM_RE.fullmatch(platform.lower()):
@@ -137,9 +161,13 @@ class Observer:
     def _run(self):
         while True:
             batch = [self.q.get()]
+            deadline = time.monotonic() + self.batch_window
             while len(batch) < BATCH_MAX:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
                 try:
-                    batch.append(self.q.get_nowait())
+                    batch.append(self.q.get(timeout=remaining))
                 except queue.Empty:
                     break
             self._send(batch)
@@ -153,10 +181,12 @@ class Observer:
                 method="POST",
                 headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.token}"},
             )
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with _OPENER.open(request, timeout=self.timeout) as response:
                 response.read(1024)
             self.sent += len(batch)
-        except Exception:  # noqa: BLE001 - descarta: o Hermes nunca espera o Habblaud
+        except Exception as error:  # noqa: BLE001 - descarta: o Hermes nunca espera o Habblaud
+            if isinstance(error, urllib.error.HTTPError):
+                error.close()
             self.dropped += len(batch)
 
 
@@ -174,9 +204,16 @@ def _tool_ok(result):
 
 def load_config(home):
     """Lê <HERMES_HOME>/habblaud-observer.json (ou HABBLAUD_OBSERVER_CONFIG). Inválida ou ausente: None."""
+    # HABBLAUD_OBSERVER_CONFIG vale para o processo todo (todos os perfis do gateway): é só para os testes. Em produção,
+    # cada perfil usa o seu <HERMES_HOME>/habblaud-observer.json.
     path = Path(os.environ.get("HABBLAUD_OBSERVER_CONFIG") or Path(home) / "habblaud-observer.json")
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        with open(path, encoding="utf-8") as f:
+            mode = os.fstat(f.fileno()).st_mode
+            if mode & 0o077:
+                log.warning("habblaud-observer: %s tem permissão de grupo/outros (modo %o); recusado, use chmod 600", path, mode & 0o777)
+                return None
+            raw = json.load(f)
     except (OSError, ValueError):
         return None
     if not isinstance(raw, dict):
@@ -195,6 +232,7 @@ def load_config(home):
 
 
 def register(ctx):
+    observer = None
     try:
         home = Path(__file__).resolve().parents[2]  # <HERMES_HOME>/plugins/habblaud-observer/__init__.py
         config = load_config(home)
@@ -205,4 +243,6 @@ def register(ctx):
         for name in HOOKS:
             ctx.register_hook(name, observer.hook(name))
     except Exception:  # noqa: BLE001 - o plugin nunca derruba o Hermes
+        if observer is not None:
+            observer.disabled = True  # os ganchos que já entraram não mandam nada
         log.warning("habblaud-observer: falha ao registrar; desligado", exc_info=True)
