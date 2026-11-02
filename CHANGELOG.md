@@ -45,7 +45,6 @@ do meio (0.**3**.0).
 
 - **Agentes do Hermes no escritório.** O chip da conta vira um "H" redondo na cor do Hermes, o selo "Hermes" aparece ao
   lado do nome e a caixa de mensagem fica desligada ("O Hermes só é acompanhado aqui: responda no canal dele").
-
 - **Barra de teclas no terminal do celular.** Com tela de toque, o terminal interativo ganha uma barra com Esc, Tab,
   Ctrl (um toque arma; a próxima tecla vai com Ctrl, como Ctrl+C) e as setas, logo acima do teclado do iPhone, sem
   fechá-lo a cada toque.

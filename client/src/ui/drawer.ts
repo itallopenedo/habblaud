@@ -581,9 +581,11 @@ class AgentView {
       const where = a.activity?.tool === 'mcp__ccd_turn__wrap_up' ? tr('ao Claude Desktop') : codex ? tr('ao Codex{0}', [/codex/i.test(accName) ? '' : ` (${accName})`]) : tr('ao terminal da {0}', [accName]);
       setText(this.alertText, a.activity?.tool === 'mcp__ccd_turn__wrap_up' && !!a.canMessage && access().messages
         ? tr('Escolha uma opção abaixo para responder ao Claude Desktop.')
-        : codex && a.activity?.kind === 'ask'
-          ? tr('Responda no Codex: no terminal, ⇧← abre a pergunta.')
-          : tr('Vá {0} em {1} para responder{2}', [where, room?.name ?? tr('seu projeto'), a.waitingFor ? `: ${a.waitingFor}` : '.']));
+        : provider === 'hermes'
+          ? tr('Responda no canal do Hermes{0}', [a.waitingFor ? `: ${a.waitingFor}` : '.'])
+          : codex && a.activity?.kind === 'ask'
+            ? tr('Responda no Codex: no terminal, ⇧← abre a pergunta.')
+            : tr('Vá {0} em {1} para responder{2}', [where, room?.name ?? tr('seu projeto'), a.waitingFor ? `: ${a.waitingFor}` : '.']));
     }
     // Perguntas (só leitura fora do Claude Desktop): o Codex mostra as opções, mas só se responde no terminal dele.
     const asking = waiting && a.activity?.kind === 'ask' ? a.activity : undefined;
@@ -734,7 +736,9 @@ class AgentView {
               : TERMINAL_UNAVAILABLE_HINT
           : !live
             ? tr('O agente já saiu do escritório.')
-            : kind === 'ao vivo'
+            : provider === 'hermes'
+              ? tr('Ver a atividade desta sessão, ao vivo (T)')
+              : kind === 'ao vivo'
               ? tr('Ver a conversa desta sessão como no {0}, ao vivo{1} (T)', [
                   provider === 'codex' ? 'Codex' : tr('terminal do Claude Code'),
                   this.pty.enabled && ptyControllable(this.last) ? tr('; "Assumir daqui" continua nela aqui') : '',

@@ -3393,4 +3393,7 @@ export const FR: Readonly<Record<string, string>> = {
   "   Hermes: desligado (defina HABBLAUD_HERMES_TOKEN_HASH).": "   Hermes : désactivé (définissez HABBLAUD_HERMES_TOKEN_HASH).",
   "O Hermes só é acompanhado aqui: responda no canal dele": "Hermes est seulement suivi ici : répondez dans son canal",
   "Agente do Hermes (VPS)": "Agent Hermes (VPS)",
+  "{0} · responda no canal do Hermes": "{0} · répondez dans le canal de Hermes",
+  "Responda no canal do Hermes{0}": "Répondez dans le canal de Hermes{0}",
+  "Ver a atividade desta sessão, ao vivo (T)": "Voir l'activité de cette session, en direct (T)",
 };

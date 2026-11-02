@@ -229,6 +229,9 @@ describe('terminalFooter', () => {
       'Esperando você: aprovar uma permissão · responda no Claude Code: este pedido não chegou ao Habblaud ou passou do tempo de espera',
     );
     expect(terminalFooter(agent({ status: 'waiting', provider: 'codex' }), [], now).text).toMatch(/^Esperando você · responda no Codex:/);
+    expect(terminalFooter(agent({ status: 'waiting', waitingFor: 'aprovar um comando', provider: 'hermes' }), [], now).text).toBe(
+      'Esperando você: aprovar um comando · responda no canal do Hermes',
+    );
     // Pergunta do Claude Desktop (caixa de próximos passos): os botões da gaveta respondem, então não diz que o pedido se perdeu.
     const desk = { id: 'x', kind: 'ask', icon: '❓', text: 'Perguntando', tool: 'mcp__ccd_turn__wrap_up', at: 0 } as unknown as AgentInfo['activity'];
     const desktop = (answerable: boolean) => terminalFooter(agent({ status: 'waiting', waitingFor: 'responder', activity: desk, canMessage: true }), [], now, answerable).text;
