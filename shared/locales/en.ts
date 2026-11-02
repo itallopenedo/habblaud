@@ -3309,4 +3309,7 @@ export const EN: Readonly<Record<string, string>> = {
   "Ver arquivos": "Show files",
   "Atualizar": "Refresh",
   "Nenhum arquivo de ver (imagem, PDF, página, texto) escrito nesta sessão.": "No viewable file (image, PDF, page, text) written in this session.",
+
+  // Fase 5 — terminal
+  "fora das pastas de projeto": "outside the project folders",
 };

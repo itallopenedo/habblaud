@@ -3326,4 +3326,7 @@ export const FR: Readonly<Record<string, string>> = {
   "Ver arquivos": "Voir les fichiers",
   "Atualizar": "Actualiser",
   "Nenhum arquivo de ver (imagem, PDF, página, texto) escrito nesta sessão.": "Aucun fichier affichable (image, PDF, page, texte) écrit dans cette session.",
+
+  // Fase 5 — terminal
+  "fora das pastas de projeto": "hors des dossiers de projet",
 };

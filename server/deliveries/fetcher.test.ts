@@ -67,4 +67,24 @@ describe('FileFetcher', () => {
     f.ack({ results: [{ id: list[0].id, ok: true, data: Buffer.from('png').toString('base64') }] });
     await expect(got).resolves.toEqual({ data: Buffer.from('png') });
   });
+
+  it('Node: com `inside`, recusa (403) o que está fora das pastas de projeto, pelo caminho real', async () => {
+    const seen: string[] = [];
+    const f = new FileFetcher({
+      direct: true,
+      // Um link dentro do projeto que aponta para fora: o checkFile devolve o caminho real.
+      check: (p) => ({ path: p === '/proj/link.png' ? '/Users/a/Documents/extrato.png' : p, size: 3 }),
+      read: () => Buffer.from('abc'),
+      inside: (p) => (seen.push(p), p.startsWith('/proj/')),
+    });
+    expect(await f.get('/proj/x.png')).toEqual({ data: Buffer.from('abc') });
+    expect(await f.get('/Users/a/Documents/extrato.png')).toEqual({ error: 'fora das pastas de projeto', status: 403 });
+    expect(await f.get('/proj/link.png')).toEqual({ error: 'fora das pastas de projeto', status: 403 });
+    expect(seen).toEqual(['/proj/x.png', '/Users/a/Documents/extrato.png', '/Users/a/Documents/extrato.png']);
+  });
+
+  it('Docker: `inside` não se aplica às pastas montadas (quem restringe lá é o auxiliar do host)', async () => {
+    const f = new FileFetcher({ mapHostPath: (p) => `/claude${p}`, check: (p) => ({ path: p, size: 3 }), read: () => Buffer.from('m'), inside: () => false });
+    expect(await f.get('/h/.claude/projects/x/print.png')).toEqual({ data: Buffer.from('m') });
+  });
 });

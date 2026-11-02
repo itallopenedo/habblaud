@@ -12,6 +12,9 @@ do meio (0.**3**.0).
 
 ### Corrigido
 
+- **Arquivos do agente no modo Node só das pastas de projeto.** Sem o Docker, a seção Arquivos e as entregas abriam
+  qualquer arquivo de ver que o agente citasse; agora valem só as pastas de projeto que o Claude Code conhece, as
+  temporárias e os anexos do Habblaud, a mesma regra que o auxiliar do host já seguia no Docker.
 - **Botões do Claude Desktop respondem pelo escritório.** A caixa de próximos passos manda hoje só o rótulo de cada
   botão; o Habblaud exigia um texto à parte e recusava a escolha. Agora o rótulo é a resposta, como no Claude Desktop.
   Botões marcados como ação do app (commit, PR, comentários) também respondem pelo escritório, com o texto do botão;

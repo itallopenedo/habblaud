@@ -26,6 +26,11 @@ interface Pending {
 export interface FileFetcherOptions {
   /** Modo Node: lê direto do disco. */
   direct?: boolean;
+  /**
+   * Modo Node: só lê o arquivo (caminho real, depois do checkFile) que estiver numa pasta de projeto conhecida, numa
+   * temporária ou nos anexos — a mesma regra do auxiliar do host no Docker (insideKnownFolder). Ausente = sem restrição.
+   */
+  inside?: (realPath: string) => boolean;
   /** Docker: o caminho do host dentro do container, quando a pasta está montada (undefined = não está). */
   mapHostPath?: (path: string) => string | undefined;
   read?: (path: string) => Buffer;
@@ -117,6 +122,7 @@ export class FileFetcher {
   private readLocal(path: string): FetchResult {
     const c = (this.opts.check ?? checkFile)(path);
     if ('error' in c) return { error: c.error, status: c.error === tr('arquivo não encontrado') ? 404 : 403 };
+    if (this.opts.direct && this.opts.inside && !this.opts.inside(c.path)) return { error: tr('fora das pastas de projeto'), status: 403 };
     try {
       const data = (this.opts.read ?? readFileSync)(c.path);
       this.remember(path, data);

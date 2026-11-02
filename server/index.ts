@@ -52,6 +52,7 @@ import { createWhisperTranscriber, findWhisper } from './dictation/whisper';
 import { DeliveryIndex } from './deliveries/deliveries';
 import { AgentFiles } from './deliveries/agent-files';
 import { FileFetcher } from './deliveries/fetcher';
+import { insideKnownFolder, tempRoots } from './deliveries/files';
 import { WorldClient } from './world/client';
 import { createWorldRoutes } from './world/http';
 import { WorldService } from './world/service';
@@ -214,9 +215,13 @@ const deliveries = history
       agentName: (id) => office.list().find((a) => a.id === id)?.name,
     })
   : undefined;
+// Pastas que o leitor do modo Node pode abrir: as de projeto que alguma conta do Claude Code conhece, as temporárias e
+// os anexos (a mesma regra do auxiliar do host no Docker, scripts/codex-bridge.ts).
+const fileRoots = [...tempRoots(), attachmentsRoot()];
 const deliveryFiles = deliveries
   ? new FileFetcher({
       direct: !config.inDocker,
+      inside: config.inDocker ? undefined : (p) => insideKnownFolder(p, { accountDirs: config.claudeDirs, roots: fileRoots }),
       mapHostPath: (p) => {
         for (const e of accounts.entries()) {
           const host = e.detected.configDir.replace(/\/+$/, '');
