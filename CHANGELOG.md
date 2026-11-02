@@ -12,6 +12,8 @@ do meio (0.**3**.0).
 
 ### Corrigido
 
+- **Rodapé do terminal na pergunta do Claude Desktop.** Em vez de dizer que o pedido "não chegou ao Habblaud", o rodapé
+  manda responder pelos botões na gaveta do agente ou no Claude Desktop.
 - **Aba Arquivos abre só o que está na pasta do próprio agente.** Antes valia qualquer pasta com projeto do Claude Code
   (e `~/.claude/projects/-Users-fulano` faz quase o home inteiro contar). Agora o arquivo precisa estar na pasta do
   agente (ou nas temporárias e nos anexos do Habblaud); um agente aberto no home continua vendo o que está no home.

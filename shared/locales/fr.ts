@@ -3367,4 +3367,6 @@ export const FR: Readonly<Record<string, string>> = {
   "Seta para baixo": "Flèche bas",
   "Seta para a direita": "Flèche droite",
   "fora da pasta do agente": "hors du dossier de l'agent",
+  "{0} · responda pelos botões na gaveta do agente ou no Claude Desktop": "{0} · répondez avec les boutons du panneau de l'agent ou dans Claude Desktop",
+  "{0} · responda no Claude Desktop": "{0} · répondez dans Claude Desktop",
 };

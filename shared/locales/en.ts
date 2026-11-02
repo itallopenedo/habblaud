@@ -3350,4 +3350,6 @@ export const EN: Readonly<Record<string, string>> = {
   "Seta para baixo": "Down arrow",
   "Seta para a direita": "Right arrow",
   "fora da pasta do agente": "outside the agent's folder",
+  "{0} · responda pelos botões na gaveta do agente ou no Claude Desktop": "{0} · answer with the buttons in the agent panel or in Claude Desktop",
+  "{0} · responda no Claude Desktop": "{0} · answer in Claude Desktop",
 };
