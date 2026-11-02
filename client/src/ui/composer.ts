@@ -336,7 +336,8 @@ export class MessageComposer {
 
   /** A caixa passa a `key`: mostra os anexos dele e descarta os de agentes que já não estão no escritório. */
   private showFiles(key: string): void {
-    const live = new Set((this.ctx.store.snapshot?.agents ?? []).map((a) => a.id));
+    // Ao vivo, não o reconstruído do timelapse: um agente que já saiu hoje não volta a existir só porque a linha do tempo o mostra.
+    const live = new Set((this.ctx.store.liveSnapshot?.agents ?? []).map((a) => a.id));
     for (const [k, list] of [...this.filesBy]) {
       if (k === key || live.has(k)) continue;
       for (const f of list) if (f.url) URL.revokeObjectURL(f.url);
