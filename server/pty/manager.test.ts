@@ -9,6 +9,7 @@ import {
   claudeBinFrom,
   findExecutable,
   fixSpawnHelper,
+  withSpawnHelperCheck,
   isExecutableFile,
   MAX_PTYS,
   PtyError,
@@ -334,6 +335,40 @@ describe('carregar o node-pty e achar o claude', () => {
       expect(() => fixSpawnHelper(join(dir, 'vazia'), 'darwin', 'arm64')).not.toThrow();
     }),
   );
+
+  it.runIf(unix)(
+    'chmod que falha vira aviso (não derruba); sem o arquivo, nenhum aviso',
+    withDir((dir) => {
+      const sub = join(dir, 'prebuilds', 'darwin-arm64');
+      mkdirSync(sub, { recursive: true });
+      writeFileSync(join(sub, 'spawn-helper'), '');
+      chmodSync(join(sub, 'spawn-helper'), 0o644);
+      const warns: string[] = [];
+      const io = {
+        chmod: () => {
+          throw new Error('EPERM');
+        },
+        warn: (m: string) => void warns.push(m),
+      };
+      expect(() => fixSpawnHelper(dir, 'darwin', 'arm64', io)).not.toThrow();
+      expect(warns).toHaveLength(1);
+      expect(warns[0]).toMatch(/spawn-helper.*EPERM/);
+      fixSpawnHelper(join(dir, 'vazia'), 'darwin', 'arm64', io);
+      expect(warns).toHaveLength(1);
+    }),
+  );
+
+  it('a permissão do spawn-helper é conferida antes de cada terminal (um npm install com o serviço no ar a desfaz)', () => {
+    const calls: string[] = [];
+    const native: SpawnPty = () => {
+      calls.push('spawn');
+      return new FakeProc(1);
+    };
+    const spawn = withSpawnHelperCheck(native, () => void calls.push('fix'));
+    spawn('claude', [], { cwd: '/', cols: 80, rows: 24, env: {} });
+    spawn('claude', [], { cwd: '/', cols: 80, rows: 24, env: {} });
+    expect(calls).toEqual(['fix', 'spawn', 'fix', 'spawn']);
+  });
 
   it('terminal de teste: aponta o motivo quando o spawn falha ou o processo sai com erro', async () => {
     const failing: SpawnPty = () => {

@@ -12,8 +12,10 @@ do meio (0.**3**.0).
 
 ### Corrigido
 
+- **Terminal: o `spawn-helper` do node-pty é conferido a cada terminal novo.** Um `npm install` com o serviço no ar
+  desfazia a permissão e quebrava todo terminal até reiniciar; agora ela volta sozinha (e uma falha vira aviso no log).
 - **Serviço nativo: idioma certo e falha visível ao reinstalar.** O LaunchAgent usa o `LANG` de quem instalou (ex.:
-  `pt_BR.UTF-8`) quando for UTF-8, em vez de sempre `en_US.UTF-8`. Se o `native:install` não conseguir religar o
+  `pt_BR.UTF-8`) quando for UTF-8 e o locale existir, em vez de sempre `en_US.UTF-8`. Se o `native:install` não conseguir religar o
   serviço (agora 10 tentativas), o log de erro ganha uma linha com a data dizendo para rodar o comando de novo.
 - **Anexos antigos são apagados sozinhos.** As pastas em `~/.habblaud/attachments/` com mais de 7 dias (só as que o
   Habblaud criou, sem seguir links) saem ao subir o servidor e a cada 6 h. No Docker, quem limpa é o auxiliar do host

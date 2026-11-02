@@ -543,10 +543,12 @@ export async function loadPty(): Promise<{ spawn: SpawnPty | null; reason?: stri
   }
   if (!ptySpawn) return { spawn: null, reason: tr('node-pty sem spawn()') };
   const nativeSpawn = ptySpawn;
-  const spawn: SpawnPty = (file, args, o) => nativeSpawn(file, args, { name: 'xterm-256color', cwd: o.cwd, cols: o.cols, rows: o.rows, env: o.env });
+  const raw: SpawnPty = (file, args, o) => nativeSpawn(file, args, { name: 'xterm-256color', cwd: o.cwd, cols: o.cols, rows: o.rows, env: o.env });
   // No Windows não há spawn-helper; o teste de spawn foi pensado para o macOS e o Linux.
-  if (process.platform === 'win32') return { spawn };
+  if (process.platform === 'win32') return { spawn: raw };
   const dir = nodePtyDir();
+  // Conferido a cada terminal (poucos stat): um npm install com o serviço no ar refaz o node-pty sem a permissão.
+  const spawn = dir ? withSpawnHelperCheck(raw, () => fixSpawnHelper(dir)) : raw;
   if (dir) fixSpawnHelper(dir);
   const problem = await spawnProblem(spawn);
   return problem ? { spawn: null, reason: problem } : { spawn };
@@ -566,16 +568,35 @@ function nodePtyDir(): string | undefined {
  * de instalação a devolve: sem ela, todo terminal falha com "posix_spawnp failed". Devolve a permissão nas pastas em
  * que o node-pty procura o binário nativo (o spawn-helper usado é o que fica ao lado dele).
  */
-export function fixSpawnHelper(ptyDir: string, platform: NodeJS.Platform = process.platform, arch: string = process.arch): void {
+export function fixSpawnHelper(
+  ptyDir: string,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+  io: { chmod: (file: string, mode: number) => void; warn: (msg: string) => void } = { chmod: chmodSync, warn: (m) => log.warn(m) },
+): void {
   for (const sub of ['build/Release', 'build/Debug', `prebuilds/${platform}-${arch}`]) {
     const file = join(ptyDir, sub, 'spawn-helper');
+    let mode: number;
     try {
-      const mode = statSync(file).mode;
-      if (!(mode & 0o100)) chmodSync(file, (mode & 0o777) | 0o111);
+      mode = statSync(file).mode;
     } catch {
-      // não existe (ou não deu para mudar): o teste de spawn diz se o terminal abre
+      continue; // não existe: o teste de spawn diz se o terminal abre
+    }
+    if (mode & 0o100) continue;
+    try {
+      io.chmod(file, (mode & 0o777) | 0o111);
+    } catch (err) {
+      io.warn(tr('Não consegui devolver a permissão de execução a {0}: {1}', [file, errMsg(err)]));
     }
   }
+}
+
+/** Antes de cada terminal novo, `check` (devolver a permissão do spawn-helper). */
+export function withSpawnHelperCheck(spawn: SpawnPty, check: () => void): SpawnPty {
+  return (file, args, o) => {
+    check();
+    return spawn(file, args, o);
+  };
 }
 
 /** Abre um terminal de teste (o próprio Node, que sai na hora): null se deu certo, senão o motivo. */

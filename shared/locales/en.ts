@@ -3354,4 +3354,5 @@ export const EN: Readonly<Record<string, string>> = {
   "{0} · responda no Claude Desktop": "{0} · answer in Claude Desktop",
   "Anexos antigos apagados: {0} (mais de 7 dias, em {1}).": "Old attachments deleted: {0} (older than 7 days, in {1}).",
   "native:install: não deu para religar o serviço; rode npm run native:install de novo": "native:install: could not restart the service; run npm run native:install again",
+  "Não consegui devolver a permissão de execução a {0}: {1}": "Could not restore the execute permission on {0}: {1}",
 };
