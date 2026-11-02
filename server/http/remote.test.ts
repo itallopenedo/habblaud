@@ -572,6 +572,7 @@ describe('porta remota', () => {
       const first = await request(s.remoteBase, `/api/agents/a1/files/${idOf('relatorio.md')}`, { headers });
       expect([first.status, first.body]).toEqual([200, 'versao 1']);
       expect(first.headers['cache-control']).toBe('no-store');
+      expect(first.headers['cross-origin-resource-policy']).toBe('same-origin');
       writeFileSync(doc, 'versao 2, maior');
       const second = await request(s.remoteBase, `/api/agents/a1/files/${idOf('relatorio.md')}`, { headers });
       expect([second.status, second.body]).toEqual([200, 'versao 2, maior']);

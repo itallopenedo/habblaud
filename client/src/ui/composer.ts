@@ -76,8 +76,14 @@ export class MessageComposer {
   private fileList: HTMLElement;
   /** Recusa do último arquivo escolhido (não mexe na situação do envio: o envio em andamento segue o seu curso). */
   private fileNote: HTMLElement;
-  /** Anexos da caixa (valem para o agente que está nela; trocar de agente os tira). */
-  private files: PendingFile[] = [];
+  /** Anexos por agente (como os rascunhos): sobrevivem a trocar de agente e a ele ficar fora do ar por um instante. */
+  private filesBy = new Map<string, PendingFile[]>();
+  /** Anexos do agente da caixa. */
+  private get files(): PendingFile[] {
+    let list = this.filesBy.get(this.agentId);
+    if (!list) this.filesBy.set(this.agentId, (list = []));
+    return list;
+  }
   private hint: HTMLElement;
   private tip: HTMLElement | null;
   private status: HTMLElement;
@@ -171,7 +177,8 @@ export class MessageComposer {
       // Gravando para outro agente: para sem transcrever (a fala era para aquele).
       this.dictate.cancel();
       this.shown = shown;
-      this.clearFiles();
+      // Os anexos seguem o agente, não o "pronto": só trocar de agente muda a lista (e quem saiu de vez perde os seus).
+      if (key !== this.agentId) this.showFiles(key);
       this.agentId = key;
       this.box.value = ready ? (this.drafts.get(key) ?? '') : '';
       this.box.style.height = '';
@@ -299,16 +306,24 @@ export class MessageComposer {
     setHidden(this.fileNote, !text);
   }
 
-  private removeFile(item: PendingFile): void {
+  /** Tira um anexo de `key` (o agente da caixa, ou o que enviou: a caixa pode ter mudado de agente no meio do envio). */
+  private removeFile(item: PendingFile, key = this.agentId): void {
     if (item.url) URL.revokeObjectURL(item.url);
     item.el.remove();
-    this.files = this.files.filter((f) => f !== item);
+    this.filesBy.set(key, (this.filesBy.get(key) ?? []).filter((f) => f !== item));
     this.sayFile();
     this.syncButton();
   }
 
-  private clearFiles(): void {
-    for (const f of [...this.files]) this.removeFile(f);
+  /** A caixa passa a `key`: mostra os anexos dele e descarta os de agentes que já não estão no escritório. */
+  private showFiles(key: string): void {
+    const live = new Set((this.ctx.store.snapshot?.agents ?? []).map((a) => a.id));
+    for (const [k, list] of [...this.filesBy]) {
+      if (k === key || live.has(k)) continue;
+      for (const f of list) if (f.url) URL.revokeObjectURL(f.url);
+      this.filesBy.delete(k);
+    }
+    this.fileList.replaceChildren(...(this.filesBy.get(key) ?? []).map((f) => f.el));
     this.sayFile();
   }
 
@@ -363,7 +378,7 @@ export class MessageComposer {
         this.resize();
       }
     }
-    for (const f of files) this.removeFile(f);
+    for (const f of files) this.removeFile(f, agentId);
     const m = r.message;
     this.setState(agentId, { phase: m.status, id: m.id, error: m.error, at: Date.now() });
     if (!isSettled(m.status)) this.poll(agentId, m.id, Date.now());

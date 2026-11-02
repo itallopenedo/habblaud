@@ -188,6 +188,8 @@ function sendFile(res: ServerResponse, data: Buffer, type: string, name: string,
     'Cache-Control': cache,
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'SAMEORIGIN',
+    // Só a própria página embute ou lê estes arquivos (imagens do terminal, arquivos do agente, entregas).
+    'Cross-Origin-Resource-Policy': 'same-origin',
     'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(name)}`,
     ...(active ? { 'Content-Security-Policy': "sandbox; default-src 'none'; img-src data: blob: 'self'; style-src 'unsafe-inline'; media-src 'self'" } : {}),
   });

@@ -1,5 +1,6 @@
 // Seção Arquivos da gaveta (Fase 4, D4): os arquivos que o agente escreveu ou editou na sessão (Write, Edit, MultiEdit,
-// NotebookEdit), lidos do fim do transcript, do mais recente para o mais antigo. Só entram os que dá para ver no
+// NotebookEdit; as edições de notebook entram na leitura, mas .ipynb não é um tipo visível, então nunca aparece na
+// lista), lidos do fim do transcript, do mais recente para o mais antigo. Só entram os que dá para ver no
 // escritório (mesmos tipos e mesma blocklist das entregas, deliveries/files.ts); quem lê o arquivo é o FileFetcher das
 // entregas. Os ids são opacos e valem para a última listagem de cada agente.
 import { createHash } from 'node:crypto';

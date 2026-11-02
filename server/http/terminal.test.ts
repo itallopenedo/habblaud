@@ -598,6 +598,7 @@ describe('terminal: imagens sob demanda', () => {
       const res = await fetch(`${env.base}${imageRoute(MAIN, 'u-img:i0')}`);
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toBe('image/png');
+      expect(res.headers.get('cross-origin-resource-policy')).toBe('same-origin');
       expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG);
       s.close();
     } finally {
