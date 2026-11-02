@@ -29,6 +29,13 @@ do meio (0.**3**.0).
 
 ### Adicionado
 
+- **Terminal interativo pelo iPhone, só pela tailnet.** Com `HABBLAUD_TAILNET_USER` (o login do Tailscale) e `pty` em
+  `HABBLAUD_REMOTE_ALLOW`, o Habblaud abre uma terceira porta só em `127.0.0.1` (`HABBLAUD_TAILNET_PORT`, padrão
+  4749), para o `tailscale serve --https=8443` publicar. Toda requisição nela precisa do usuário do Tailscale certo e
+  do mesmo login da porta do celular (mesmas sessões e mesmo freio de senha); abrir, assumir, encerrar e ligar a tela
+  de um terminal pedem a senha de novo se a última conferência passou de 10 min (401 `reauth`). Pela rede local (4748)
+  o terminal interativo continua recusado. Um processo do próprio Mac consegue imitar o cabeçalho do Tailscale, mas
+  ainda precisa do login, de `pty` e da senha recente.
 - **Habblaud como serviço no macOS (`npm run native:install`).** Faz o build e instala um LaunchAgent que mantém o
   Habblaud rodando sem o Docker, com o terminal interativo ligado (`HABBLAUD_PTY=1`), o mesmo `.env` do projeto e logs
   em `~/.habblaud/logs/`. `npm run native:status` mostra o estado e `npm run native:uninstall` tira o serviço (o Docker

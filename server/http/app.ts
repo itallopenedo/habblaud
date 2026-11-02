@@ -11,6 +11,7 @@ import type { SessionLookup } from '../sources/source';
 import { isJsonContentType, isLoopbackHost } from './guard';
 import type { RemoteFeature } from './remote';
 import { handleSessionsRoute } from './sessions';
+import { ptyNeedsConfirm } from './tailnet';
 import type { Hub } from './sse';
 import { handleStatsRoute } from './stats';
 import type { TerminalStreams } from './terminal';
@@ -93,9 +94,11 @@ export interface ApiDeps {
   };
   /**
    * Porta remota com login (http/remote.ts): `is` diz se a requisição chegou por ela (já autenticada); `allows`, o que
-   * HABBLAUD_REMOTE_ALLOW libera. Requisição remota nunca vale pelo Host: só pelo que `allows` liberar.
+   * HABBLAUD_REMOTE_ALLOW libera. Requisição remota nunca vale pelo Host: só pelo que `allows` liberar. `tailnet` diz se
+   * ela veio pela porta da tailnet (http/tailnet.ts, a única por onde o terminal interativo vale remoto) e `confirmed`,
+   * se a senha foi conferida há menos de 10 min com o cookie dela.
    */
-  remote?: { is(req: IncomingMessage): boolean; allows(feature: RemoteFeature): boolean };
+  remote?: { is(req: IncomingMessage): boolean; allows(feature: RemoteFeature): boolean; tailnet?(req: IncomingMessage): boolean; confirmed?(req: IncomingMessage): boolean };
   /**
    * Rotas do Habblaud World (/api/world/*, server/world/http.ts). Ausente = HABBLAUD_WORLD=0: 404 em todas. Só pela porta
    * local com Host local: pela porta do celular, nem com login (403 `local_only`).
@@ -287,6 +290,10 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
     isRemote(req) ? !!feature && !!deps.remote?.allows(feature) : isLoopbackHost(req.headers.host);
   const denied = (req: IncomingMessage, localMessage: string): string =>
     isRemote(req) ? tr('não liberado no acesso remoto (veja HABBLAUD_REMOTE_ALLOW)') : localMessage;
+  /** Remoto que pode usar o terminal interativo: só pela porta da tailnet e com `pty` liberado. */
+  const remotePty = (req: IncomingMessage): boolean => !!deps.remote?.tailnet?.(req) && trusted(req, 'pty');
+  /** O que /api/health e /api/access dizem do terminal interativo: local só com Host local (como o pty.ts exige). */
+  const ptyUsable = (req: IncomingMessage): boolean => !!deps.pty && (isRemote(req) ? remotePty(req) : isLoopbackHost(req.headers.host));
 
   const methodNotAllowed = (res: ServerResponse, allow: string) => {
     res.setHeader('Allow', allow);
@@ -398,8 +405,8 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           remote,
           terminal: !!terminals && (!remote || trusted(req, 'terminal')),
           permissions: !!deps.permissions && (!remote || trusted(req, 'permissions')),
-          // O terminal interativo (pty) nunca vale pela porta remota.
-          pty: !!deps.pty && !remote,
+          // O terminal interativo (pty) nunca vale pela porta do celular na rede; pela da tailnet, só com `pty`.
+          pty: ptyUsable(req),
           messages: !!deps.messages && (!remote || trusted(req, 'messages')),
           codexEvents: !!deps.codexLive,
           updates: updatesSummary(deps.updates?.status()),
@@ -424,6 +431,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           messages: !!deps.messages && trusted(req, 'messages'),
           terminal: !!terminals && trusted(req, 'terminal'),
           spawn: !!deps.spawn && trusted(req, 'spawn'),
+          pty: ptyUsable(req),
           world: !!deps.world && !!deps.terminal && !remote && isLoopbackHost(req.headers.host),
         };
         sendJson(res, 200, access);
@@ -500,11 +508,21 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       return true;
     }
     if (path === '/api/pty' || path.startsWith('/api/pty/') || AGENT_ACTION_ROUTE.test(path)) {
-      // Executa comandos na máquina: nunca pela porta remota, nem com login (o Host e o endereço de quem conecta não
-      // bastam: o Tailscale chega pelo loopback e o Host se imita).
-      if (isRemote(req)) sendJson(res, 403, { error: tr('o terminal interativo só pode ser usado no próprio computador') });
-      else if (!deps.pty) sendJson(res, 403, { error: tr('terminal interativo desligado (veja o log do servidor)') });
-      else deps.pty(req, res, path);
+      // Executa comandos na máquina. Pela porta do celular na rede, nunca (o Host e o endereço de quem conecta não bastam:
+      // o Tailscale chega pelo loopback e o Host se imita). Pela porta da tailnet (http/tailnet.ts), só com o usuário do
+      // Tailscale conferido, `pty` liberado e, para abrir/assumir/encerrar/ligar a tela, a senha conferida há pouco.
+      if (isRemote(req) && !remotePty(req)) {
+        req.resume();
+        sendJson(res, 403, {
+          error: deps.remote?.tailnet?.(req)
+            ? tr('terminal interativo não liberado no acesso remoto (veja HABBLAUD_REMOTE_ALLOW: pty)')
+            : tr('o terminal interativo só pode ser usado no próprio computador'),
+        });
+      } else if (!deps.pty) sendJson(res, 403, { error: tr('terminal interativo desligado (veja o log do servidor)') });
+      else if (isRemote(req) && ptyNeedsConfirm(method, path) && !deps.remote?.confirmed?.(req)) {
+        req.resume();
+        sendJson(res, 401, { error: tr('confirme a senha para abrir o terminal'), code: 'reauth' });
+      } else deps.pty(req, res, path);
       return true;
     }
     const characterMatch = CHARACTER_ROUTE.exec(path);

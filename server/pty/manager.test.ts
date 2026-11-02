@@ -295,6 +295,15 @@ describe('ptyRequestProblem', () => {
     expect(ptyRequestProblem(req({ host: 'localhost:4747', 'sec-fetch-site': 'same-site' }))).toMatch(/origem/);
     expect(ptyRequestProblem(req({ host: 'localhost:4747', 'sec-fetch-site': 'cross-site' }))).toMatch(/origem/);
   });
+
+  it('pela tailnet: o Host .ts.net vale (o guard já conferiu), mas a conexão segue do loopback e a origem segue a mesma, com a porta', () => {
+    expect(ptyRequestProblem(req({ host: 'mac.tail.ts.net:8443', origin: 'https://mac.tail.ts.net:8443', 'sec-fetch-site': 'same-origin' }), true)).toBeNull();
+    expect(ptyRequestProblem(req({ host: 'mac.tail.ts.net:8443' }), false)).toMatch(/localhost/);
+    // A página da 443 (outra origem) não manda no terminal da 8443.
+    expect(ptyRequestProblem(req({ host: 'mac.tail.ts.net:8443', origin: 'https://mac.tail.ts.net' }), true)).toMatch(/origem/);
+    expect(ptyRequestProblem(req({ host: 'mac.tail.ts.net:8443' }, '100.64.0.2'), true)).toMatch(/próprio computador/);
+    expect(ptyRequestProblem(req({}), true)).not.toBeNull();
+  });
 });
 
 describe('carregar o node-pty e achar o claude', () => {

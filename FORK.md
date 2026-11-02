@@ -27,3 +27,20 @@ O serviço lê o mesmo `.env` do projeto (`node --env-file-if-exists`); logs em 
 `habblaud.error.log`. Não rode o Docker e o serviço ao mesmo tempo (mesma porta). Dados: `~/.habblaud` (no Docker, o
 volume `habblaud_habblaud-data`; a migração copiou o volume para `~/.habblaud` e deixou um backup em
 `~/.habblaud/docker-data-backup-<data>`). O `npm run codex:bridge` não é necessário no modo nativo.
+
+## Terminal interativo no iPhone (só pela tailnet)
+
+No `.env`: `HABBLAUD_TAILNET_USER=<login do Tailscale>` e `pty` em `HABBLAUD_REMOTE_ALLOW`. O Habblaud abre a porta
+`127.0.0.1:4749` (`HABBLAUD_TAILNET_PORT`), que o Tailscale publica com HTTPS:
+
+    tailscale serve --bg --https=8443 http://127.0.0.1:4749     # desligar: tailscale serve --https=8443 off
+
+No iPhone: `https://<mac>.<tailnet>.ts.net:8443` (o mesmo login da 443). Abrir, assumir ou encerrar um terminal pede a
+senha de novo quando a última conferência passou de 10 min. Pela rede local (4748) o terminal interativo continua
+recusado.
+
+O que protege: a 4749 só escuta no `127.0.0.1` (ninguém da rede a alcança); toda requisição precisa do cabeçalho
+`Tailscale-User-Login` igual a `HABBLAUD_TAILNET_USER` (o `tailscale serve` põe o do usuário da tailnet e descarta o
+que vier do cliente), do login remoto (as mesmas sessões e o mesmo freio de senha da 4748) e de `pty` liberado; as
+rotas só do computador (`/api/host/*`, hooks, World) seguem recusadas. Limite conhecido: um processo do próprio Mac
+consegue imitar o cabeçalho, mas ainda precisa do login, de `pty` e da senha recente, e esse processo já teria a 4747.

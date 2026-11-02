@@ -3332,4 +3332,12 @@ export const ES: Readonly<Record<string, string>> = {
   "porta da tailnet desligada: precisa do acesso remoto com login (npm run remote:setup)": "puerto de la tailnet desactivado: necesita el acceso remoto con login (npm run remote:setup)",
   "Só pela tailnet, com o usuário liberado em HABBLAUD_TAILNET_USER.": "Solo por la tailnet, con el usuario permitido en HABBLAUD_TAILNET_USER.",
   "Porta da tailnet: não deu para escutar em {0}:{1} ({2}).": "Puerto de la tailnet: no se pudo escuchar en {0}:{1} ({2}).",
+  "terminal interativo não liberado no acesso remoto (veja HABBLAUD_REMOTE_ALLOW: pty)": "terminal interactiva no permitida en el acceso remoto (mira HABBLAUD_REMOTE_ALLOW: pty)",
+  "confirme a senha para abrir o terminal": "confirma la contraseña para abrir la terminal",
+  "   Acesso remoto: \"pty\" liberado, mas o terminal interativo só vale pela porta da tailnet (defina HABBLAUD_TAILNET_USER).": "   Acceso remoto: \"pty\" permitido, pero la terminal interactiva solo funciona por el puerto de la tailnet (define HABBLAUD_TAILNET_USER).",
+  "Erro ao responder (tailnet) {0} {1}: {2}": "Error al responder (tailnet) {0} {1}: {2}",
+  "desligado ({0})": "desactivado ({0})",
+  "liberado": "permitido",
+  "não liberado (pty em HABBLAUD_REMOTE_ALLOW)": "no permitido (pty en HABBLAUD_REMOTE_ALLOW)",
+  "   Porta da tailnet: ligada em 127.0.0.1:{0}, com login e o usuário do Tailscale; terminal interativo: {1}.": "   Puerto de la tailnet: activo en 127.0.0.1:{0}, con login y el usuario de Tailscale; terminal interactiva: {1}.",
 };
