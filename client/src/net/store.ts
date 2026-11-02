@@ -311,7 +311,7 @@ export class OfficeStore {
    * (agente que não recebe mensagens, fila cheia, acesso que não é local...). Sem conexão com o servidor: lança.
    * No ?mock=1 a entrega é fictícia (o simulador põe a atividade no agente).
    */
-  async sendMessage(agentId: string, text: string, choice?: { questionId: string; option: number }, attachments?: string[]): Promise<{ message: OutboxMessage } | { error: string }> {
+  async sendMessage(agentId: string, text: string, choice?: { questionId: string; option: number }, attachments?: string[]): Promise<{ message: OutboxMessage } | { error: string; status?: number }> {
     if (this.mock) return this.mockSend(agentId, text);
     const body = choice ? { agentId, ...choice } : { agentId, text, ...(attachments?.length ? { attachments } : {}) };
     const res = await fetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -323,7 +323,7 @@ export class OfficeStore {
     }
     if (res.status === 201 && data && typeof data === 'object') return { message: data as OutboxMessage };
     const error = (data as { error?: unknown } | undefined)?.error;
-    return { error: typeof error === 'string' ? error : tr('erro {0}', [res.status]) };
+    return { error: typeof error === 'string' ? error : tr('erro {0}', [res.status]), status: res.status };
   }
 
   /** Manda um anexo da mensagem (POST /api/attachments, base64 em JSON): o id para o sendMessage ou o erro. Sem conexão: lança. */

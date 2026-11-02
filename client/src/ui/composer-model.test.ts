@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentInfo } from '../../../shared/types';
 import {
   attachmentProblem,
+  attachmentsLocked,
   canSend,
   CODEX_BRIDGE_HINT,
   CODEX_TIMEOUT_ERROR,
@@ -14,8 +15,10 @@ import {
   MESSAGE_FILES_MAX,
   messageText,
   PLUGIN_HINT,
+  pickAttachments,
   pollDelay,
   sendStatusText,
+  staleAttachmentIds,
   timeoutError,
   TIMEOUT_ERROR,
   type ComposerEnv,
@@ -140,5 +143,30 @@ describe('caixa de mensagem (peças puras)', () => {
     expect(attachmentProblem({ name: 'a.jpg', size: 10 }, MESSAGE_FILES_MAX)).toMatch(/No máximo 8/);
     expect(attachmentProblem({ name: 'a.jpg', size: 0 }, 0)).toMatch(/vazio/);
     expect(attachmentProblem({ name: 'a.jpg', size: MESSAGE_FILE_BYTES + 1 }, 0)).toMatch(/passa de 15 MB/);
+  });
+
+  it('anexos: travados enquanto o envio está em andamento', () => {
+    expect(attachmentsLocked(undefined)).toBe(false);
+    expect(attachmentsLocked('sending')).toBe(true);
+    for (const p of ['queued', 'sent', 'delivered', 'failed', 'rejected'] as const) expect(attachmentsLocked(p)).toBe(false);
+  });
+
+  it('anexos: o que entra de uma seleção e o primeiro motivo de recusa', () => {
+    const f = (name: string, size = 10) => ({ name, size });
+    expect(pickAttachments([f('a'), f('b')], 0)).toEqual({ accepted: [0, 1], problem: undefined });
+    // Vários ruins: mostra o primeiro, os bons entram.
+    const r = pickAttachments([f('vazio', 0), f('ok'), f('outro', 0)], 0);
+    expect(r.accepted).toEqual([1]);
+    expect(r.problem).toMatch(/vazio/);
+    expect(r.problem).not.toMatch(/outro/);
+    // Passou do limite: o resto da seleção não entra, com o aviso de quantidade.
+    const many = pickAttachments([f('a'), f('b'), f('c')], MESSAGE_FILES_MAX - 1);
+    expect(many.accepted).toEqual([0]);
+    expect(many.problem).toMatch(/No máximo 8/);
+  });
+
+  it('anexos: ids já enviados só se perdem quando o servidor diz que o anexo não vale (400)', () => {
+    expect(staleAttachmentIds(400)).toBe(true);
+    for (const s of [undefined, 403, 404, 409, 429, 500]) expect(staleAttachmentIds(s)).toBe(false);
   });
 });

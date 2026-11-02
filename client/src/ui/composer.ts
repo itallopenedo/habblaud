@@ -10,19 +10,20 @@
 import { MESSAGE_MAX } from '../../../shared/messages';
 import type { AgentInfo, OutboxMessage, Provider } from '../../../shared/types';
 import {
-  attachmentProblem,
+  attachmentsLocked,
   canSend,
   composerMode,
   composerTip,
   enterSends,
   isSettled,
   LOST_ERROR,
-  MESSAGE_FILES_MAX,
   messageText,
   OFFLINE_ERROR,
   POLL_LIMIT_MS,
+  pickAttachments,
   pollDelay,
   sendStatusText,
+  staleAttachmentIds,
   timeoutError,
   type ComposerMode,
   type SendState,
@@ -46,6 +47,9 @@ interface PendingFile {
   file: File;
   url?: string;
   el: HTMLElement;
+  remove: HTMLButtonElement;
+  /** Id do anexo já enviado ao servidor: a nova tentativa não o envia de novo. */
+  id?: string;
 }
 
 export class MessageComposer {
@@ -70,6 +74,8 @@ export class MessageComposer {
   private fileInput: HTMLInputElement;
   private attachBtn: HTMLButtonElement;
   private fileList: HTMLElement;
+  /** Recusa do último arquivo escolhido (não mexe na situação do envio: o envio em andamento segue o seu curso). */
+  private fileNote: HTMLElement;
   /** Anexos da caixa (valem para o agente que está nela; trocar de agente os tira). */
   private files: PendingFile[] = [];
   private hint: HTMLElement;
@@ -126,6 +132,7 @@ export class MessageComposer {
     });
     this.attachBtn = iconButton(ICONS.attach, tr('Anexar foto ou arquivo'), () => this.fileInput.click(), 'ui-msg__attach');
     this.fileList = h('ul', { class: 'ui-spawn__files ui-msg__files', attrs: { 'aria-label': tr('Anexos') } });
+    this.fileNote = h('p', { class: 'ui-msg__status is-error', role: 'status', hidden: true, attrs: { 'aria-live': 'polite' } });
     this.row = h('div', { class: `ui-msg__row${term ? ' ui-term__prompt ui-term__prompt--mic' : ''}` });
     if (term) this.row.append(h('span', { class: 'ui-term__caret', text: '>', attrs: { 'aria-hidden': 'true' } }));
     this.row.append(this.box, this.attachBtn, this.dictate.el, this.sendBtn);
@@ -139,7 +146,7 @@ export class MessageComposer {
     this.hint = h('p', { class: 'ui-msg__hint', hidden: true });
     this.status = h('p', { class: 'ui-msg__status', role: 'status', hidden: true, attrs: { 'aria-live': 'polite' } });
     this.tip = term ? null : h('p', { class: 'ui-msg__tip', text: composerTip() });
-    this.el = h('div', { class: `ui-msg ui-msg--${variant}` }, this.hint, this.row, this.fileList, this.fileInput, this.dictStatus, this.status, this.tip);
+    this.el = h('div', { class: `ui-msg ui-msg--${variant}` }, this.hint, this.row, this.fileList, this.fileNote, this.fileInput, this.dictStatus, this.status, this.tip);
   }
 
   /**
@@ -258,39 +265,51 @@ export class MessageComposer {
   }
 
   private syncButton(): void {
-    this.sendBtn.disabled = this.mode.kind !== 'ready' || !canSend(this.box.value, this.files.length) || this.states.get(this.agentId)?.phase === 'sending';
+    const sending = this.states.get(this.agentId)?.phase === 'sending';
+    this.sendBtn.disabled = this.mode.kind !== 'ready' || !canSend(this.box.value, this.files.length) || sending;
+    // Enviando, os anexos ficam como estão (o envio já os levou).
+    this.attachBtn.disabled = attachmentsLocked(this.states.get(this.agentId)?.phase);
+    for (const f of this.files) f.remove.disabled = this.attachBtn.disabled;
   }
 
   private addFiles(list: File[]): void {
-    for (const file of list) {
-      const problem = attachmentProblem(file, this.files.length);
-      if (problem) {
-        this.setState(this.agentId, { phase: 'rejected', error: problem, at: Date.now() });
-        if (this.files.length >= MESSAGE_FILES_MAX) break;
-        continue;
-      }
+    if (attachmentsLocked(this.states.get(this.agentId)?.phase)) return;
+    const { accepted, problem } = pickAttachments(list, this.files.length);
+    this.sayFile(problem);
+    for (const i of accepted) {
+      const file = list[i]!;
       const url = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
-      const item: PendingFile = { file, url, el: h('li', { class: 'ui-spawn__file' }) };
+      const el = h('li', { class: 'ui-spawn__file' });
       const thumb = url
         ? h('img', { class: 'ui-spawn__thumb', attrs: { src: url, alt: '' } })
         : h('span', { class: 'ui-spawn__thumb ui-spawn__thumb--doc', attrs: { 'aria-hidden': 'true' }, text: (file.name.split('.').pop() ?? '').slice(0, 4).toUpperCase() || tr('ARQ') });
-      const remove = iconButton(ICONS.close, tr('Tirar {0}', [file.name]), () => this.removeFile(item), 'ui-icon-btn--sm ui-spawn__file-x');
-      item.el.append(thumb, h('span', { class: 'ui-spawn__file-name', text: file.name, attrs: { title: file.name } }), remove);
+      const remove = iconButton(ICONS.close, tr('Tirar {0}', [file.name]), () => {
+        if (!attachmentsLocked(this.states.get(this.agentId)?.phase)) this.removeFile(item);
+      }, 'ui-icon-btn--sm ui-spawn__file-x');
+      const item: PendingFile = { file, url, el, remove };
+      el.append(thumb, h('span', { class: 'ui-spawn__file-name', text: file.name, attrs: { title: file.name } }), remove);
       this.files.push(item);
-      this.fileList.append(item.el);
+      this.fileList.append(el);
     }
     this.syncButton();
+  }
+
+  private sayFile(text = ''): void {
+    setText(this.fileNote, text);
+    setHidden(this.fileNote, !text);
   }
 
   private removeFile(item: PendingFile): void {
     if (item.url) URL.revokeObjectURL(item.url);
     item.el.remove();
     this.files = this.files.filter((f) => f !== item);
+    this.sayFile();
     this.syncButton();
   }
 
   private clearFiles(): void {
     for (const f of [...this.files]) this.removeFile(f);
+    this.sayFile();
   }
 
   /** Cresce com o texto até o limite do CSS (~6 linhas; depois rola). Escondida, mede quando aparecer. */
@@ -314,18 +333,20 @@ export class MessageComposer {
     this.providers.set(agentId, this.provider);
     this.setState(agentId, { phase: 'sending', at: Date.now() });
     const files = choice ? [] : [...this.files];
-    let r: { message: OutboxMessage } | { error: string } | undefined;
+    let r: { message: OutboxMessage } | { error: string; status?: number } | undefined;
     try {
-      const ids: string[] = [];
       for (const f of files) {
+        if (f.id) continue; // já subiu numa tentativa anterior
         const up = await this.ctx.store.uploadAttachment(f.file.name, f.file.type, await fileToBase64(f.file));
         if ('error' in up) {
           r = up;
           break;
         }
-        ids.push(up.id);
+        f.id = up.id;
       }
-      r ??= await this.ctx.store.sendMessage(agentId, choice ? '' : messageText(raw), choice, ids);
+      r ??= await this.ctx.store.sendMessage(agentId, choice ? '' : messageText(raw), choice, files.map((f) => f.id!));
+      // O servidor não aceitou os anexos (venceram ou ele não os conhece): a próxima tentativa envia tudo de novo.
+      if ('error' in r && staleAttachmentIds(r.status)) for (const f of files) f.id = undefined;
     } catch {
       r = { error: OFFLINE_ERROR };
     }

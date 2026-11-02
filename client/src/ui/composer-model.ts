@@ -67,6 +67,32 @@ export function attachmentProblem(f: { name: string; size: number }, count: numb
   return undefined;
 }
 
+/** Quais arquivos de uma seleção entram (índices) e o primeiro motivo de recusa; passou do limite, o resto não entra. */
+export function pickAttachments(list: { name: string; size: number }[], count: number): { accepted: number[]; problem: string | undefined } {
+  const accepted: number[] = [];
+  let problem: string | undefined;
+  for (const [i, f] of list.entries()) {
+    const p = attachmentProblem(f, count + accepted.length);
+    if (!p) {
+      accepted.push(i);
+      continue;
+    }
+    problem ??= p;
+    if (count + accepted.length >= MESSAGE_FILES_MAX) break;
+  }
+  return { accepted, problem };
+}
+
+/** Com o envio em andamento (subindo os anexos ou esperando o POST) não se anexa nem se tira arquivo. */
+export function attachmentsLocked(phase: SendPhase | undefined): boolean {
+  return phase === 'sending';
+}
+
+/** O servidor recusou a mensagem por causa dos anexos (400: vencido ou desconhecido): os ids guardados não valem mais. */
+export function staleAttachmentIds(status: number | undefined): boolean {
+  return status === 400;
+}
+
 /** Enter manda; Shift+Enter (e Alt+Enter) quebram a linha; Enter compondo um acento (IME) não conta. */
 export function enterSends(e: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'altKey' | 'isComposing'>): boolean {
   return e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.isComposing;
