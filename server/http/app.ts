@@ -98,6 +98,8 @@ export interface ApiDeps {
 
 /** GET /api/agents/:id/terminal (ids nunca contêm '/'). */
 const TERMINAL_ROUTE = /^\/api\/agents\/([^/]+)\/terminal$/;
+/** GET /api/terminal/image/:stream/:id: imagem de uma entrada do terminal (http/terminal.ts, TerminalImages). */
+const TERMINAL_IMAGE_ROUTE = /^\/api\/terminal\/image\/([^/]+)\/([^/]+)$/;
 /** POST /api/agents/:id/stop|takeover (terminal interativo). */
 const AGENT_ACTION_ROUTE = /^\/api\/agents\/[^/]+\/(stop|takeover)$/;
 
@@ -429,6 +431,28 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           return true;
         }
         terminals.attach(req, res, id);
+      }
+      return true;
+    }
+    const imageMatch = TERMINAL_IMAGE_ROUTE.exec(path);
+    if (imageMatch) {
+      // Imagens da conversa: a mesma trava do terminal.
+      if (!isRead) methodNotAllowed(res, 'GET');
+      else if (!terminals) sendJson(res, 403, { error: tr('terminal desligado: ele só funciona com o Habblaud acessível apenas pelo próprio computador') });
+      else if (!trusted(req, 'terminal')) sendJson(res, 403, { error: denied(req, tr('o terminal só abre pelo próprio computador (http://localhost ou http://127.0.0.1)')) });
+      else {
+        let stream: string;
+        let id: string;
+        try {
+          stream = decodeURIComponent(imageMatch[1]);
+          id = decodeURIComponent(imageMatch[2]);
+        } catch {
+          sendJson(res, 400, { error: tr('id inválido') });
+          return true;
+        }
+        const img = terminals.images.get(stream, id);
+        if (!img) sendJson(res, 404, { error: tr('imagem indisponível: abra o terminal de novo') });
+        else sendFile(res, img.data, img.mime, `imagem.${img.mime.slice('image/'.length).replace('jpeg', 'jpg')}`);
       }
       return true;
     }

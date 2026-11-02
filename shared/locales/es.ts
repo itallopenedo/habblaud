@@ -3287,4 +3287,7 @@ export const ES: Readonly<Record<string, string>> = {
   "Carimbo deixado na portaria: {0}": "Sello dejado en la recepción: {0}",
   "Entre no prédio ou chegue mais perto da porta para carimbar.": "Entra al edificio o acércate más a la puerta para sellar.",
   "O carimbo não foi deixado. Tente de novo.": "El sello no se dejó. Inténtalo de nuevo.",
+
+  // Fase 4 — mídia
+  "imagem indisponível: abra o terminal de novo": "imagen no disponible: abre la terminal de nuevo",
 };

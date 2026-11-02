@@ -12,13 +12,13 @@ import { isLoopbackBind, loadConfig, terminalOffReason } from '../config';
 import { setQuiet } from '../log';
 import { NameStore } from '../model/names';
 import { Office } from '../model/office';
-import type { TerminalParser } from '../sources/terminal';
+import { createTerminalParser, type TerminalParser } from '../sources/terminal';
 import { ClaudeWatcher, encodeCwd } from '../sources/watcher';
 import { appendLines, L, tempDir, writeLines } from '../test/fixtures';
 import { createApiHandler } from './app';
 import { createRequestGuard } from './guard';
 import { Hub } from './sse';
-import { MAX_STREAMS, TerminalStreams, type TerminalOptions } from './terminal';
+import { MAX_STREAMS, TerminalImages, TerminalStreams, type TerminalOptions } from './terminal';
 
 setQuiet(true);
 
@@ -577,5 +577,66 @@ describe('ClaudeWatcher.transcriptPathOf', () => {
       watcher.stop();
       tmp.cleanup();
     }
+  });
+});
+
+describe('terminal: imagens sob demanda', () => {
+  const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+  const imageRoute = (stream: string, id: string) => `/api/terminal/image/${encodeURIComponent(stream)}/${encodeURIComponent(id)}`;
+
+  it('a imagem do prompt sai pela rota depois que o terminal leu o transcript; o stream só leva a referência', async () => {
+    const env = await serve({ streams: { createParser: createTerminalParser } });
+    try {
+      const file = join(env.dir, 't.jsonl');
+      const content = [{ type: 'text', text: 'olha' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG.toString('base64') } }];
+      writeLines(file, [JSON.stringify({ type: 'user', uuid: 'u-img', timestamp: new Date().toISOString(), cwd: '/p/loja', message: { role: 'user', content } })]);
+      env.paths.set(MAIN, file);
+      const s = await open(env.base, route(MAIN));
+      await waitFor(() => expect(inits(s)).toHaveLength(1));
+      expect(inits(s)[0].entries[0]).toMatchObject({ kind: 'user', images: [{ id: 'u-img:i0', mime: 'image/png' }] });
+      expect(s.raw).not.toContain(PNG.toString('base64'));
+      const res = await fetch(`${env.base}${imageRoute(MAIN, 'u-img:i0')}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('image/png');
+      expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG);
+      s.close();
+    } finally {
+      await env.close();
+    }
+  });
+
+  it('id desconhecido: 404; Host que não é local: 403; POST: 405; terminal desligado: 403', async () => {
+    const env = await serve();
+    try {
+      const miss = await fetch(`${env.base}${imageRoute(MAIN, 'nao-existe:i0')}`);
+      expect(miss.status).toBe(404);
+      expect((await miss.json()).error).toMatch(/imagem indisponível/);
+      const lan = await open(env.base, imageRoute(MAIN, 'x:i0'), { headers: { Host: `habblaud.lan:${env.port}` } });
+      expect(lan.status).toBe(403);
+      expect((await open(env.base, imageRoute(MAIN, 'x:i0'), { method: 'POST', headers: { 'Content-Type': 'application/json' } })).status).toBe(405);
+    } finally {
+      await env.close();
+    }
+    const off = await serve({ terminal: false });
+    try {
+      expect((await fetch(`${off.base}${imageRoute(MAIN, 'x:i0')}`)).status).toBe(403);
+    } finally {
+      await off.close();
+    }
+  });
+
+  it('cache com teto: a menos usada sai; o que não é imagem raster fica de fora', () => {
+    const b64 = (s: string) => Buffer.from(s).toString('base64');
+    const cache = new TerminalImages(10, 2);
+    cache.put('a', { id: '1', mime: 'image/png', data: b64('1234') });
+    cache.put('a', { id: '2', mime: 'image/png', data: b64('5678') });
+    cache.get('a', '1');
+    cache.put('a', { id: '3', mime: 'image/png', data: b64('90') });
+    expect(cache.get('a', '2')).toBeUndefined();
+    expect(cache.get('a', '1')?.data.toString()).toBe('1234');
+    expect(cache.get('b', '1')).toBeUndefined();
+    cache.put('a', { id: 'svg', mime: 'image/svg+xml', data: b64('<svg/>') });
+    expect(cache.get('a', 'svg')).toBeUndefined();
+    expect(cache.size).toBe(2);
   });
 });

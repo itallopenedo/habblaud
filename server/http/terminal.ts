@@ -16,7 +16,7 @@ import type { Activity, AgentInfo, TerminalEntry, TerminalInit } from '../../sha
 import { errMsg, log } from '../log';
 import type { Office } from '../model/office';
 import { FileTail } from '../sources/tail';
-import { createTerminalParser, type TerminalParser } from '../sources/terminal';
+import { createTerminalParser, IMAGE_TYPES, type TerminalImageData, type TerminalParser } from '../sources/terminal';
 import { sendJson } from './app';
 import { frame } from './sse';
 import { tr } from '../../shared/i18n';
@@ -77,8 +77,61 @@ interface ConversationSource {
   poll(): PollResult;
 }
 
+/** Imagens guardadas para GET /api/terminal/image (todas as conexões juntas): teto de bytes e de itens. */
+export const IMAGE_CACHE_BYTES = 48 * 1024 * 1024;
+export const IMAGE_CACHE_ITEMS = 300;
+/** Imagem maior que isto (decodificada) não entra: fica só o marcador "[imagem]" no texto. */
+export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Imagens das conversas lidas pelos terminais, por conexão (`stream` = o agentId do `init`: id do agente ou
+ * "session:<conta>:<sessionId>") e id da imagem. Entram quando o transcript é lido e saem pela ordem de uso: o
+ * snapshot e o stream só levam a referência {id, mime}.
+ */
+export class TerminalImages {
+  private readonly items = new Map<string, { mime: string; data: Buffer }>();
+  private bytes = 0;
+
+  constructor(
+    private readonly maxBytes = IMAGE_CACHE_BYTES,
+    private readonly maxItems = IMAGE_CACHE_ITEMS,
+  ) {}
+
+  get size(): number {
+    return this.items.size;
+  }
+
+  put(stream: string, img: TerminalImageData): void {
+    const key = `${stream}\n${img.id}`;
+    if (this.touch(key) || !IMAGE_TYPES.test(img.mime)) return;
+    const data = Buffer.from(img.data, 'base64');
+    if (!data.length || data.length > IMAGE_MAX_BYTES) return;
+    this.items.set(key, { mime: img.mime, data });
+    this.bytes += data.length;
+    for (const [k, v] of this.items) {
+      if (this.bytes <= this.maxBytes && this.items.size <= this.maxItems) break;
+      this.items.delete(k);
+      this.bytes -= v.data.length;
+    }
+  }
+
+  get(stream: string, id: string): { mime: string; data: Buffer } | undefined {
+    return this.touch(`${stream}\n${id}`);
+  }
+
+  /** Item usado agora: vai para o fim da fila de saída. */
+  private touch(key: string): { mime: string; data: Buffer } | undefined {
+    const hit = this.items.get(key);
+    if (hit) {
+      this.items.delete(key);
+      this.items.set(key, hit);
+    }
+    return hit;
+  }
+}
+
 /** Passa as linhas pelo parser; uma linha que o faça falhar é pulada sem perder o resto do lote. */
-function parseInto(parser: TerminalParser, lines: readonly string[], out: TerminalEntry[]): void {
+function parseInto(parser: TerminalParser, lines: readonly string[], out: TerminalEntry[], keep?: (img: TerminalImageData) => void): void {
   for (const line of lines) {
     let entries: TerminalEntry[];
     try {
@@ -88,6 +141,7 @@ function parseInto(parser: TerminalParser, lines: readonly string[], out: Termin
       continue;
     }
     for (const e of entries) out.push(e);
+    if (keep) for (const img of parser.drainImages?.() ?? []) keep(img);
   }
 }
 
@@ -99,11 +153,12 @@ class TranscriptSource implements ConversationSource {
   private tail: FileTail;
   /** Criado em load(), que sempre roda antes do primeiro poll(). */
   private parser!: TerminalParser;
+  private readonly keep = (img: TerminalImageData) => this.o.images.put(this.agentId, img);
 
   constructor(
     private readonly agentId: string,
     path: string,
-    private readonly o: Required<Pick<TerminalOptions, 'transcriptPathOf' | 'createParser' | 'initTailBytes' | 'initEntries'>>,
+    private readonly o: Required<Pick<TerminalOptions, 'transcriptPathOf' | 'createParser' | 'initTailBytes' | 'initEntries'>> & { images: TerminalImages },
     readonly intervalMs: number,
   ) {
     this.tail = new FileTail(path);
@@ -117,7 +172,7 @@ class TranscriptSource implements ConversationSource {
     let dropped = false;
     for (let i = 0; i < MAX_INIT_READS; i++) {
       const r = this.tail.read();
-      parseInto(this.parser, r.lines, entries);
+      parseInto(this.parser, r.lines, entries, this.keep);
       // Descarta o excesso pelo caminho (transcript com muitas entradas pequenas).
       if (entries.length > keep * 2) {
         entries = entries.slice(-keep);
@@ -144,7 +199,7 @@ class TranscriptSource implements ConversationSource {
       // Arquivo sumido: `missing`, sem linhas; continua tentando nos próximos ciclos.
       const r = this.tail.read();
       if (r.reset) return { init: this.load() };
-      parseInto(this.parser, r.lines, fresh);
+      parseInto(this.parser, r.lines, fresh, this.keep);
       if (!r.more) break;
     }
     return { append: fresh };
@@ -190,6 +245,8 @@ interface Stream {
 
 export class TerminalStreams {
   private streams = new Set<Stream>();
+  /** Imagens das conversas abertas (um cache por servidor), servidas por GET /api/terminal/image. */
+  readonly images = new TerminalImages();
   private pinger: ReturnType<typeof setInterval> | null = null;
   private readonly createParser: () => TerminalParser;
   private readonly demoEntries: NonNullable<TerminalOptions['demoEntries']>;
@@ -241,7 +298,7 @@ export class TerminalStreams {
    * (HistorySession.createParser; padrão: o do Claude Code). Mesmos erros de attach (429/500).
    */
   attachSession(req: IncomingMessage, res: ServerResponse, streamId: string, path: string, createParser?: () => TerminalParser): void {
-    const o = { transcriptPathOf: () => undefined, createParser: createParser ?? this.createParser, initTailBytes: this.initTailBytes, initEntries: this.initEntries };
+    const o = { transcriptPathOf: () => undefined, createParser: createParser ?? this.createParser, initTailBytes: this.initTailBytes, initEntries: this.initEntries, images: this.images };
     this.serve(req, res, streamId, new TranscriptSource(streamId, path, o, this.sessionPollMs));
   }
 
@@ -291,7 +348,7 @@ export class TerminalStreams {
       if (!path) return tr('transcript do agente não encontrado');
       const parserFor = this.opts.parserFor;
       const createParser = parserFor ? () => parserFor(agentId) ?? this.createParser() : this.createParser;
-      const o = { transcriptPathOf: this.opts.transcriptPathOf, createParser, initTailBytes: this.initTailBytes, initEntries: this.initEntries };
+      const o = { transcriptPathOf: this.opts.transcriptPathOf, createParser, initTailBytes: this.initTailBytes, initEntries: this.initEntries, images: this.images };
       return new TranscriptSource(agentId, path, o, this.pollMs);
     }
     // Os agentes do demo não estão entre os reais do Office, mas office.detail os encontra.
