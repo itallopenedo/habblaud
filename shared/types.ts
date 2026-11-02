@@ -496,6 +496,13 @@ export interface ModWaitingAgent {
  */
 export type TerminalInputKind = 'command' | 'diff' | 'json' | 'text';
 
+/** Imagem de uma entrada do terminal: só a referência (o conteúdo sai sob demanda em GET /api/terminal/image/:stream/:id). */
+export interface TerminalImage {
+  id: string;
+  /** image/png, image/jpeg, image/gif ou image/webp. */
+  mime: string;
+}
+
 /**
  * Uma entrada do terminal: a conversa da sessão reconstruída do transcript JSONL,
  * no formato em que o Claude Code a mostra. Todo texto já vem com segredos mascarados e truncado.
@@ -503,8 +510,8 @@ export type TerminalInputKind = 'command' | 'diff' | 'json' | 'text';
  * entrada 'result' que aponta para a 'tool' pelo `toolUseId`.
  */
 export type TerminalEntry =
-  /** Prompt do usuário ou comando de barra (ex.: "/model"). */
-  | { kind: 'user'; id: string; at: number; text: string }
+  /** Prompt do usuário ou comando de barra (ex.: "/model"). `images`: imagens coladas no prompt. */
+  | { kind: 'user'; id: string; at: number; text: string; images?: TerminalImage[] }
   /** Texto da resposta do agente (markdown). */
   | { kind: 'assistant'; id: string; at: number; text: string }
   /** Bloco de raciocínio; `text` ausente quando o transcript só guarda a assinatura. */
@@ -514,8 +521,8 @@ export type TerminalEntry =
    * "Read(server/index.ts)". `input` = argumentos relevantes (comando, diff...), quando houver.
    */
   | { kind: 'tool'; id: string; at: number; tool: string; title: string; input?: string; inputKind?: TerminalInputKind }
-  /** Resultado de uma ferramenta. `truncated` = o texto foi cortado (resultado longo demais). */
-  | { kind: 'result'; id: string; at: number; toolUseId: string; text: string; error?: boolean; truncated?: boolean }
+  /** Resultado de uma ferramenta. `truncated` = o texto foi cortado (resultado longo demais). `images`: capturas de tela, imagens lidas. */
+  | { kind: 'result'; id: string; at: number; toolUseId: string; text: string; error?: boolean; truncated?: boolean; images?: TerminalImage[] }
   /** Evento da sessão: compactação, interrupção, resultado em segundo plano, erro da API... */
   | { kind: 'system'; id: string; at: number; text: string; detail?: string; level?: 'info' | 'warn' | 'error' };
 
