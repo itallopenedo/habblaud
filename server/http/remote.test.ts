@@ -7,7 +7,9 @@ import { AccountsService } from '../accounts/service';
 import { setQuiet } from '../log';
 import { NameStore } from '../model/names';
 import { Office } from '../model/office';
-import { tempDir } from '../test/fixtures';
+import { AgentFiles } from '../deliveries/agent-files';
+import { FileFetcher } from '../deliveries/fetcher';
+import { L, tempDir, writeLines } from '../test/fixtures';
 import { createApiHandler, sendJson, type ApiDeps } from './app';
 import { createRequestGuard, isLoopbackHost } from './guard';
 import {
@@ -543,6 +545,32 @@ describe('porta remota', () => {
     const h = await start();
     const r = await request(h.remoteBase, '/api/remote/login', { method: 'POST', headers: { Origin: 'http://evil.example' }, body: CREDS });
     expect(r.status).toBe(403);
+  });
+
+  it('aba Arquivos: só com terminal liberado; lista e abre pelo id, nunca pelo caminho', async () => {
+    const tmp = tempDir();
+    try {
+      const transcript = join(tmp.dir, 't.jsonl');
+      writeLines(transcript, [L.assistant([L.tool('w1', 'Write', { file_path: '/p/loja/relatorio.md', content: '# oi' })])]);
+      const extra = {
+        agentFiles: new AgentFiles({ transcriptPathOf: (id) => (id === 'a1' ? transcript : undefined), cwdOf: () => '/p/loja' }),
+        files: new FileFetcher({ direct: true, check: (p: string) => ({ path: p, size: 4 }), read: () => Buffer.from('# oi') }),
+      };
+      const no = await start(['permissions'], extra);
+      const c1 = await login(no.remoteBase);
+      expect((await request(no.remoteBase, '/api/agents/a1/files', { headers: { Cookie: c1 } })).status).toBe(403);
+      const yes = await start(['terminal'], extra);
+      const c2 = await login(yes.remoteBase);
+      const listed = JSON.parse((await request(yes.remoteBase, '/api/agents/a1/files', { headers: { Cookie: c2 } })).body);
+      expect(listed.files).toEqual([expect.objectContaining({ name: 'relatorio.md', path: 'relatorio.md', kind: 'text' })]);
+      const opened = await request(yes.remoteBase, `/api/agents/a1/files/${listed.files[0].id}`, { headers: { Cookie: c2 } });
+      expect(opened.status).toBe(200);
+      expect(opened.body).toBe('# oi');
+      expect((await request(yes.remoteBase, '/api/agents/a1/files/nao-existe', { headers: { Cookie: c2 } })).status).toBe(404);
+      expect((await request(yes.remoteBase, '/api/agents/a9/files', { headers: { Cookie: c2 } })).status).toBe(404);
+    } finally {
+      tmp.cleanup();
+    }
   });
 });
 

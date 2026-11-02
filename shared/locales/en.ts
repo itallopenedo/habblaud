@@ -3288,6 +3288,8 @@ export const EN: Readonly<Record<string, string>> = {
   "O carimbo não foi deixado. Tente de novo.": "The stamp wasn't left. Try again.",
 
   // Fase 4 — mídia
+  "os arquivos só abrem pelo próprio computador (http://localhost)": "files only open from this computer (http://localhost)",
+  "arquivo desconhecido: atualize a lista": "unknown file: refresh the list",
   "Anexar foto ou arquivo": "Attach a photo or file",
   "No máximo {0} anexos por mensagem.": "At most {0} attachments per message.",
   "{0} está vazio.": "{0} is empty.",

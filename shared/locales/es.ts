@@ -3289,6 +3289,8 @@ export const ES: Readonly<Record<string, string>> = {
   "O carimbo não foi deixado. Tente de novo.": "El sello no se dejó. Inténtalo de nuevo.",
 
   // Fase 4 — mídia
+  "os arquivos só abrem pelo próprio computador (http://localhost)": "los archivos solo se abren desde el propio equipo (http://localhost)",
+  "arquivo desconhecido: atualize a lista": "archivo desconocido: actualiza la lista",
   "Anexar foto ou arquivo": "Adjuntar foto o archivo",
   "No máximo {0} anexos por mensagem.": "Como máximo {0} adjuntos por mensaje.",
   "{0} está vazio.": "{0} está vacío.",

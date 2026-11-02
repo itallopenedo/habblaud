@@ -3305,6 +3305,8 @@ export const FR: Readonly<Record<string, string>> = {
   "O carimbo não foi deixado. Tente de novo.": "Le tampon n'a pas été laissé. Réessayez.",
 
   // Fase 4 — mídia
+  "os arquivos só abrem pelo próprio computador (http://localhost)": "les fichiers ne s'ouvrent que depuis cet ordinateur (http://localhost)",
+  "arquivo desconhecido: atualize a lista": "fichier inconnu : actualisez la liste",
   "Anexar foto ou arquivo": "Joindre une photo ou un fichier",
   "No máximo {0} anexos por mensagem.": "Au maximum {0} pièces jointes par message.",
   "{0} está vazio.": "{0} est vide.",

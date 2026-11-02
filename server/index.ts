@@ -50,6 +50,7 @@ import { isDemoId } from '../shared/timeline';
 import { DictationService } from './dictation/dictation';
 import { createWhisperTranscriber, findWhisper } from './dictation/whisper';
 import { DeliveryIndex } from './deliveries/deliveries';
+import { AgentFiles } from './deliveries/agent-files';
 import { FileFetcher } from './deliveries/fetcher';
 import { WorldClient } from './world/client';
 import { createWorldRoutes } from './world/http';
@@ -225,6 +226,16 @@ const deliveryFiles = deliveries
       },
     })
   : undefined;
+// Seção Arquivos da gaveta: o que o agente escreveu, aberto pelo mesmo leitor das entregas (mesma trava).
+const agentFiles = deliveryFiles
+  ? new AgentFiles({
+      transcriptPathOf: (id) => agents.transcriptPathOf(id),
+      cwdOf: (id) => {
+        const a = office.get(id);
+        return a ? office.roomPath(a.roomId) : undefined;
+      },
+    })
+  : undefined;
 // Linha do tempo do timelapse: grava cada snapshot novo (com throttle) em <dataDir>/timeline.
 const timelineDir = join(config.dataDir, TIMELINE_DIR);
 const timeline = config.timeline ? new TimelineRecorder({ dir: timelineDir }) : undefined;
@@ -373,6 +384,7 @@ const api = createApiHandler({
   dictation,
   deliveries,
   files: deliveryFiles,
+  agentFiles,
   spawnFolders: async () => {
     const snap = hub.current();
     const last = new Map<string, number>();

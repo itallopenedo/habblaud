@@ -588,6 +588,18 @@ export interface DeliveryAttachment {
   capture?: boolean;
 }
 
+/** Arquivo que o agente escreveu ou editou na sessão (seção Arquivos da gaveta; GET /api/agents/:id/files). */
+export interface AgentFileInfo {
+  /** Id opaco para GET /api/agents/:id/files/:fileId (o caminho real fica no servidor). */
+  id: string;
+  name: string;
+  /** Relativo à pasta do projeto; absoluto se estiver fora dela. */
+  path: string;
+  kind: DeliveryAttachmentKind;
+  /** Última escrita (epoch ms; 0 sem horário). */
+  at: number;
+}
+
 /**
  * Uma entrega: o fim de um pedido em que o agente trabalhou (usou ferramentas) e respondeu. Montada do transcript
  * (server/deliveries/deliveries.ts), do jeito que um BA receberia: manchete, resumo, pedido e anexos.
