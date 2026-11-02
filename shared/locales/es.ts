@@ -3373,4 +3373,6 @@ export const ES: Readonly<Record<string, string>> = {
   "esperado {v: 1, events: [1 a {0} eventos do Hermes]}": "se esperaba {v: 1, events: [1 a {0} eventos de Hermes]}",
   "muitos eventos do Hermes: tente de novo em instantes": "demasiados eventos de Hermes: inténtalo de nuevo en unos instantes",
   "token do Hermes inválido": "token de Hermes no válido",
+  "   Hermes: recebendo eventos pela porta da tailnet ({0}).": "   Hermes: recibiendo eventos por el puerto de la tailnet ({0}).",
+  "   Hermes: desligado (defina HABBLAUD_HERMES_TOKEN_HASH).": "   Hermes: desactivado (define HABBLAUD_HERMES_TOKEN_HASH).",
 };
