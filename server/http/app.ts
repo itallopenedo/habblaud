@@ -67,7 +67,7 @@ export interface ApiDeps {
   spawn?: SpawnService;
   /** Pastas sugeridas no "Novo agente" (GET /api/spawn/folders; spawn/folders.ts): projetos recentes. */
   spawnFolders?: () => Promise<SpawnFolder[]>;
-  /** Anexos do "Novo agente" (POST /api/spawn/attachments; spawn/attachments.ts). */
+  /** Anexos do "Novo agente" (POST /api/spawn/attachments) e das mensagens (POST /api/attachments); spawn/attachments.ts. */
   attachments?: AttachmentStore;
   /** Ditado (/api/dictation e, para o auxiliar do host, /api/host/dictation/*; dictation/dictation.ts). */
   dictation?: DictationService;
@@ -329,6 +329,18 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
     else sendJson(res, 500, { error: tr('erro interno') });
   };
 
+  /** POST de um anexo ({name, type?, data base64}) no depósito: 201 {id, name, size}. */
+  const putAttachment = (req: IncomingMessage, res: ServerResponse, store: AttachmentStore) =>
+    readJson(req, ATTACHMENT_BODY_MAX)
+      .then((body) => {
+        const a = parseAttachment(body);
+        if ('error' in a) return sendJson(res, 400, { error: a.error });
+        const r = store.put(a);
+        if ('error' in r) return sendJson(res, 429, { error: r.error });
+        sendJson(res, 201, { id: r.id, name: a.name, size: a.data.length });
+      })
+      .catch((err) => fail(res, err));
+
   return (req, res, url) => {
     const path = url.pathname;
     if (path !== '/api' && !path.startsWith('/api/')) return false;
@@ -526,16 +538,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         const store = deps.attachments;
         if (method !== 'POST') methodNotAllowed(res, 'POST');
         else if (!store) sendJson(res, 403, { error: tr('anexos desligados') });
-        else
-          readJson(req, ATTACHMENT_BODY_MAX)
-            .then((body) => {
-              const a = parseAttachment(body);
-              if ('error' in a) return sendJson(res, 400, { error: a.error });
-              const r = store.put(a);
-              if ('error' in r) return sendJson(res, 429, { error: r.error });
-              sendJson(res, 201, { id: r.id, name: a.name, size: a.data.length });
-            })
-            .catch((err) => fail(res, err));
+        else putAttachment(req, res, store);
       }
       else if (path === '/api/spawn' && method === 'POST') {
         readJson(req)
@@ -550,6 +553,15 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         if (info) sendJson(res, 200, info);
         else sendJson(res, 404, { error: tr('pedido desconhecido') });
       } else methodNotAllowed(res, path === '/api/spawn' ? 'GET, POST' : 'GET');
+      return true;
+    }
+    if (path === '/api/attachments') {
+      // Foto ou arquivo de uma mensagem: vai para a sessão junto com o texto, então a trava das mensagens.
+      const store = deps.attachments;
+      if (method !== 'POST') methodNotAllowed(res, 'POST');
+      else if (!deps.messages || !store) sendJson(res, 403, { error: tr('anexos desligados') });
+      else if (!trusted(req, 'messages')) sendJson(res, 403, { error: denied(req, tr('mensagens só são mandadas pelo próprio computador (http://localhost ou http://127.0.0.1)')) });
+      else putAttachment(req, res, store);
       return true;
     }
     if (path === '/api/dictation' || path.startsWith('/api/dictation/')) {

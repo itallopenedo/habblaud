@@ -8,7 +8,7 @@ import { setQuiet } from '../log';
 import { NameStore } from '../model/names';
 import { Office } from '../model/office';
 import { tempDir } from '../test/fixtures';
-import { createApiHandler, sendJson } from './app';
+import { createApiHandler, sendJson, type ApiDeps } from './app';
 import { createRequestGuard, isLoopbackHost } from './guard';
 import {
   COOKIE,
@@ -26,6 +26,7 @@ import {
 import { Hub } from './sse';
 import { hashPassword, parsePasswordHash } from '../remote/password';
 import { SpawnService } from '../spawn/spawn';
+import { AttachmentStore } from '../spawn/attachments';
 
 setQuiet(true);
 
@@ -176,7 +177,7 @@ afterEach(async () => {
 });
 
 /** Uma porta local (sem login) e uma remota (com login), sobre a MESMA API, como no server/index.ts. */
-async function start(allow: RemoteFeature[] = ['permissions']): Promise<Harness> {
+async function start(allow: RemoteFeature[] = ['permissions'], extra: Partial<ApiDeps> = {}): Promise<Harness> {
   const tmp = tempDir();
   const dir = join(tmp.dir, '.claude');
   mkdirSync(join(dir, 'sessions'), { recursive: true });
@@ -230,6 +231,7 @@ async function start(allow: RemoteFeature[] = ['permissions']): Promise<Harness>
       worldCalls.push(`${req.method} ${url.pathname}`);
       sendJson(res, 200, { ok: true });
     },
+    ...extra,
   });
   const guard = createRequestGuard();
   const gate = createRemoteGate({ config: CFG, sessions: new RemoteSessions(SECRET, CFG), secure: false });
@@ -305,6 +307,27 @@ async function login(base: string): Promise<string> {
 }
 
 describe('porta remota', () => {
+  it('anexo de mensagem (POST /api/attachments): com messages liberado; spawn sozinho não basta; o do Novo agente segue com spawn', async () => {
+    const file = { name: 'foto.jpg', type: 'image/jpeg', data: Buffer.from('jpeg').toString('base64') };
+    const msg = await start(['permissions', 'messages'], { attachments: new AttachmentStore() });
+    const c1 = await login(msg.remoteBase);
+    const ok = await request(msg.remoteBase, '/api/attachments', { method: 'POST', body: file, headers: { Cookie: c1 } });
+    expect(ok.status).toBe(201);
+    expect(JSON.parse(ok.body)).toMatchObject({ id: expect.any(String), name: 'foto.jpg', size: 4 });
+    expect((await request(msg.remoteBase, '/api/spawn/attachments', { method: 'POST', body: file, headers: { Cookie: c1 } })).status).toBe(403);
+
+    const sp = await start(['permissions', 'spawn'], { attachments: new AttachmentStore() });
+    const c2 = await login(sp.remoteBase);
+    expect((await request(sp.remoteBase, '/api/attachments', { method: 'POST', body: file, headers: { Cookie: c2 } })).status).toBe(403);
+    expect((await request(sp.remoteBase, '/api/spawn/attachments', { method: 'POST', body: file, headers: { Cookie: c2 } })).status).toBe(201);
+    // Porta local com Host local: vale como antes.
+    expect((await request(sp.localBase, '/api/attachments', { method: 'POST', body: file })).status).toBe(201);
+    expect((await request(sp.localBase, '/api/attachments')).status).toBe(405);
+    const off = await start(['permissions', 'messages']);
+    const c3 = await login(off.remoteBase);
+    expect((await request(off.remoteBase, '/api/attachments', { method: 'POST', body: file, headers: { Cookie: c3 } })).status).toBe(403);
+  });
+
   it('logado: terminal interativo, rotas do hook e do plugin e o auxiliar nunca passam, nem com Host local', async () => {
     const s = await start(['permissions', 'messages', 'terminal', 'spawn']);
     const cookie = await login(s.remoteBase);
