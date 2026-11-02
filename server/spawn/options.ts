@@ -41,6 +41,8 @@ export const CODEX_PERMISSIONS: Record<string, { sandbox: string; approval: stri
 const ID = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 export const CATALOG_TIMEOUT_MS = 15_000;
 export const CATALOG_TTL_MS = 10 * 60_000;
+/** Catálogo que falhou: espera este tempo antes de rodar o `codex debug models` de novo. */
+export const CATALOG_RETRY_MS = 60_000;
 
 /** Lê a saída de `codex debug models`: só os modelos listados, com os níveis de esforço que eles aceitam. */
 export function parseCodexModels(raw: unknown): ModelOption[] {
@@ -65,11 +67,11 @@ export type CodexCatalog = (codexHome?: string) => Promise<ModelOption[]>;
 export function createCodexCatalog(bin: string, opts: { env?: NodeJS.ProcessEnv; now?: () => number; ttlMs?: number } = {}): CodexCatalog {
   const now = opts.now ?? Date.now;
   const ttl = opts.ttlMs ?? CATALOG_TTL_MS;
-  const cache = new Map<string, { at: number; list: Promise<ModelOption[]> }>();
+  const cache = new Map<string, { at: number; list: Promise<ModelOption[]>; failed?: boolean }>();
   return (codexHome) => {
     const key = codexHome ?? '';
     const hit = cache.get(key);
-    if (hit && now() - hit.at < ttl) return hit.list;
+    if (hit && now() - hit.at < (hit.failed ? CATALOG_RETRY_MS : ttl)) return hit.list;
     const env = { ...(opts.env ?? process.env) };
     if (codexHome) env.CODEX_HOME = codexHome;
     const list = new Promise<ModelOption[]>((ok) => {
@@ -80,11 +82,12 @@ export function createCodexCatalog(bin: string, opts: { env?: NodeJS.ProcessEnv;
         } catch {
           parsed = [];
         }
-        if (!parsed.length) cache.delete(key);
+        if (!parsed.length) entry.failed = true;
         ok(parsed);
       });
     });
-    cache.set(key, { at: now(), list });
+    const entry: { at: number; list: Promise<ModelOption[]>; failed?: boolean } = { at: now(), list };
+    cache.set(key, entry);
     return list;
   };
 }

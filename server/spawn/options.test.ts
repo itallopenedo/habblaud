@@ -1,6 +1,9 @@
 // Opções do Novo agente: catálogo do Codex, conferência das escolhas e argumentos do Codex. Dados sintéticos.
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CLAUDE_MODELS, codexArgs, parseChoice, parseCodexModels } from './options';
+import { CATALOG_RETRY_MS, CLAUDE_MODELS, codexArgs, createCodexCatalog, parseChoice, parseCodexModels } from './options';
 
 const catalog = {
   models: [
@@ -63,3 +66,23 @@ describe('argumentos do Codex', () => {
     expect(codexArgs('/p', {}, '  ')).toEqual(['-C', '/p']);
   });
 });
+
+describe('catálogo do Codex: cache', () => {
+  it('lê com o CODEX_HOME da conta, guarda e, se falhar, só tenta de novo depois de um tempo', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hb-catalog-'));
+    const bin = join(dir, 'codex');
+    writeFileSync(bin, `#!/bin/sh\necho "$CODEX_HOME $*" >> "${dir}/calls"\n[ -f "${dir}/ok" ] && echo '${JSON.stringify(catalog)}' || echo 'quebrado'\n`);
+    chmodSync(bin, 0o755);
+    let now = 0;
+    const get = createCodexCatalog(bin, { now: () => now });
+    expect(await get('/h/.codex')).toEqual([]);
+    writeFileSync(join(dir, 'ok'), '');
+    expect(await get('/h/.codex')).toEqual([]); // falhou há pouco: não roda de novo
+    now += CATALOG_RETRY_MS + 1;
+    expect((await get('/h/.codex')).map((m) => m.id)).toEqual(['gpt-x-sol', 'gpt-x-luna']);
+    now += CATALOG_RETRY_MS + 1;
+    await get('/h/.codex');
+    expect(readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n')).toEqual(['/h/.codex debug models', '/h/.codex debug models']);
+  });
+});
+

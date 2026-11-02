@@ -155,8 +155,9 @@ export async function launch(req: SpawnRequest, open: Opener, cli?: CliRunner): 
     const r = await cli(req).catch((err: unknown) => ({ ok: false as const, error: String((err as Error)?.message ?? err) }));
     if (r.ok) return { ok: true, how: 'cli', session: r.id };
     note = cliNote(r.error);
-    // O link do app não leva modelo, esforço, permissão nem conta.
-    if (req.choice || req.configDir) note = tr('{0}; o app abre com o modelo e a conta padrão', [note]);
+    // O link do app não leva modelo, esforço, permissão nem conta: com outra conta, abrir lá seria na conta errada.
+    if (req.configDir) return { ok: false, error: note };
+    if (req.choice) note = tr('{0}; o app abre com o modelo, o esforço e a permissão padrão', [note]);
   }
   const o = await open(spawnUrl(req)).catch(() => ({ ok: false as const, error: tr('falhou ao abrir o app') }));
   if (!o.ok) return note ? { ok: false, error: tr('{0}; e o app não abriu ({1})', [note, o.error]).slice(0, ERROR_MAX) } : o;
@@ -270,7 +271,7 @@ export class SpawnService {
 
   /** Esforço pedido para a sessão (pelo começo do id), se foi o Habblaud que a começou. */
   effortOf(sessionId: string): string | undefined {
-    for (const [short, effort] of this.efforts) if (sessionId.startsWith(short)) return effort;
+    for (const [short, effort] of this.efforts) if (short.length >= 8 && sessionId.startsWith(short)) return effort;
     return undefined;
   }
 

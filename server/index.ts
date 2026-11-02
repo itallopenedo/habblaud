@@ -357,11 +357,14 @@ const ptys = spawnPty
       accounts: () => accounts.entries().map((a) => ({ id: a.id, dir: a.dir, isDefault: isDefaultDir(a.dir, config.home) })),
       codexBin: codexPtyBin,
       codexAccounts,
-      findCodexAgent: ({ cwd, account, since, taken }) =>
+      codexAgents: ({ cwd, account, since }) =>
         office
           .list()
-          .filter((a) => a.provider === 'codex' && a.kind === 'main' && a.account === account && a.startedAt >= since && !taken.has(a.id) && office.roomPath(a.roomId) === cwd)
-          .sort((a, b) => a.startedAt - b.startedAt)[0]?.id,
+          .filter((a) => {
+            const path = a.provider === 'codex' && a.kind === 'main' && a.account === account && a.startedAt >= since ? office.roomPath(a.roomId) : undefined;
+            return !!path && resolve(path) === cwd;
+          })
+          .map((a) => a.id),
       agent: (id) => {
         const a = office.get(id);
         return a && { id: a.id, kind: a.kind, account: a.account, sessionId: a.sessionId, cwd: office.roomPath(a.roomId) };

@@ -410,7 +410,7 @@ describe('carregar o node-pty e achar o claude', () => {
 });
 
 describe('Codex no terminal (Novo agente)', () => {
-  function codexSetup(find?: PtyManagerOptions['findCodexAgent']) {
+  function codexSetup(find?: PtyManagerOptions['codexAgents']) {
     const spawned: { file: string; args: string[]; env: NodeJS.ProcessEnv }[] = [];
     let now = 1_000_000;
     const manager = new PtyManager({
@@ -425,7 +425,7 @@ describe('Codex no terminal (Novo agente)', () => {
         { id: '.codex', dir: join(tmpdir(), '.codex'), isDefault: true },
         { id: '.codex-b', dir: join(tmpdir(), '.codex-b'), isDefault: false },
       ],
-      findCodexAgent: find,
+      codexAgents: find,
       agent: () => undefined,
       onChange: () => {},
       env: { PATH: '/bin', CODEX_HOME: '/velho', CLAUDECODE: '1' },
@@ -451,22 +451,25 @@ describe('Codex no terminal (Novo agente)', () => {
     expect(() => m.create({ cwd: tmpdir(), codex: { choice: {} } })).toThrow(/Codex não está instalado/);
   });
 
-  it('liga o terminal ao agente do Codex que aparece depois, um agente por terminal, e não "encerra" agente vazio', async () => {
-    const calls: Array<{ since: number; taken: string[] }> = [];
-    let found: string | undefined;
-    const { manager, tick } = codexSetup(({ since, taken }) => (calls.push({ since, taken: [...taken] }), found));
+  it('liga o terminal ao agente do Codex só sem dúvida, e não "encerra" agente vazio', async () => {
+    const calls: number[] = [];
+    let found: string[] = [];
+    const { manager, tick } = codexSetup(({ since }) => (calls.push(since), found));
     const info = manager.create({ cwd: tmpdir(), codex: { choice: {} } });
     expect(manager.list()[0].agentId).toBe('');
-    found = '.codex:019a-thread';
+    found = ['.codex:a', '.codex:b'];
+    expect(manager.list()[0].agentId).toBe(''); // dois candidatos: na dúvida, não liga
+    found = ['.codex:a'];
     tick(1_000);
-    expect(manager.list()[0].agentId).toBe('.codex:019a-thread');
-    expect(calls.at(-1)?.since).toBe(info.startedAt - 5_000);
+    expect(manager.list()[0].agentId).toBe('.codex:a');
+    expect(calls.at(-1)).toBe(info.startedAt - 5_000);
+    // Dois terminais esperando na mesma pasta e conta: nenhum liga, nem com um candidato só.
     manager.create({ cwd: tmpdir(), codex: { choice: {} } });
-    found = undefined;
-    manager.list();
-    expect(calls.at(-1)?.taken).toEqual(['.codex:019a-thread']);
+    manager.create({ cwd: tmpdir(), codex: { choice: {} } });
+    found = ['.codex:a', '.codex:c'];
+    expect(manager.list().map((p) => p.agentId)).toEqual(['.codex:a', '', '']);
     await expect(manager.stop('')).rejects.toThrow();
-    tick(5 * 60_000 + 1);
+    tick(2 * 60_000 + 1);
     const n = calls.length;
     manager.list();
     expect(calls.length).toBe(n);

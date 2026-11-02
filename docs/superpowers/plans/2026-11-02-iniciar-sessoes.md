@@ -175,3 +175,8 @@ Ligação entre o terminal do Codex e o agente do escritório: os hooks do Codex
 não dá para marcar a sessão por variável de ambiente. O servidor liga o terminal ao primeiro agente principal do
 Codex que aparece na mesma pasta e na mesma conta depois que o terminal abriu e que ainda não está ligado a outro
 terminal.
+
+Atualização (revisão do código, 2026-11-02): a ligação só acontece sem dúvida, com um único terminal esperando
+naquela pasta e conta e um único agente novo nos 2 minutos depois que ele abriu. Na dúvida o terminal fica sem
+ligar: ele funciona igual, só o cartão do agente não o abre. Uma conta que não é a padrão também não cai no app do
+Claude (ele abriria na conta errada): o erro do `claude --bg` aparece na folha.

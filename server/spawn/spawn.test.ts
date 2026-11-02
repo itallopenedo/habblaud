@@ -270,6 +270,8 @@ describe('novo agente: modelo, esforço, permissão e conta', () => {
 
   it('o app (pasta não confiável) avisa que abre sem as escolhas', async () => {
     const r = await launch({ folder: '/p', prompt: '', choice: { model: 'claude-opus-5-5' } }, async () => ({ ok: true }), async () => ({ ok: false, error: 'sem login' }));
-    expect(r).toEqual({ ok: true, how: 'app', note: 'sem login; o app abre com o modelo e a conta padrão' });
+    expect(r).toEqual({ ok: true, how: 'app', note: 'sem login; o app abre com o modelo, o esforço e a permissão padrão' });
+    // Outra conta: o app abriria na conta padrão, então fica o erro.
+    expect(await launch({ folder: '/p', prompt: '', configDir: '/h/.claude-b' }, async () => ({ ok: true }), async () => ({ ok: false, error: 'sem login' }))).toEqual({ ok: false, error: 'sem login' });
   });
 });

@@ -217,6 +217,8 @@ export class SpawnPanel {
   private typing = false;
   private files: PendingFile[] = [];
   private options: SpawnOptions | null = null;
+  /** As opções já chegaram (ou falharam): antes disso, o agente salvo fica escolhido mesmo sem saber se há Codex. */
+  private loaded = false;
   private agent: SpawnAgent = readKey(AGENT_KEY) === 'codex' ? 'codex' : 'claude';
   private choice: SpawnChoice = { ...EMPTY_CHOICE };
   private readonly agentSeg: HTMLElement;
@@ -381,6 +383,7 @@ export class SpawnPanel {
     } catch {
       this.options = null; // servidor sem as opções: só o Claude, no padrão
     }
+    this.loaded = true;
     this.renderAgent();
   }
 
@@ -398,8 +401,8 @@ export class SpawnPanel {
   /** Agente, opções dele e texto de ajuda. */
   private renderAgent(): void {
     const codexOn = !!this.options?.codex.available;
-    if (this.agent === 'codex' && !codexOn) this.agent = 'claude';
-    this.agentBtns.codex.disabled = !codexOn;
+    if (this.loaded && this.agent === 'codex' && !codexOn) this.agent = 'claude';
+    this.agentBtns.codex.disabled = this.loaded && !codexOn;
     this.agentBtns.codex.title = codexOn ? '' : (this.options?.codex.reason ?? tr('Codex indisponível'));
     for (const a of ['claude', 'codex'] as const) {
       this.agentBtns[a].setAttribute('aria-checked', String(a === this.agent));
@@ -420,7 +423,8 @@ export class SpawnPanel {
       this.choice = { ...EMPTY_CHOICE };
       return this.renderSubmit();
     }
-    this.choice = validChoice(opts, readChoice(this.agent));
+    // Claude no Docker: sem opções (o servidor recusaria), só o padrão.
+    this.choice = opts.available ? validChoice(opts, readChoice(this.agent)) : { ...EMPTY_CHOICE };
     const def = opts.accounts.find((a) => a.isDefault);
     fillSelect(
       this.account.sel,
@@ -611,6 +615,7 @@ export class SpawnPanel {
     } finally {
       this.busy = false;
       this.submitBtn.disabled = false;
+      this.renderSubmit();
     }
   }
 
@@ -642,6 +647,7 @@ export class SpawnPanel {
     } finally {
       this.busy = false;
       this.submitBtn.disabled = false;
+      this.renderSubmit();
     }
   }
 }

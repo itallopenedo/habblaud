@@ -3442,6 +3442,6 @@ export const FR: Readonly<Record<string, string>> = {
   "modelo desconhecido: {0}": "modèle inconnu : {0}",
   "esforço não aceito: {0}": "effort non accepté : {0}",
   "modo de permissão desconhecido: {0}": "mode d'autorisation inconnu : {0}",
-  "{0}; o app abre com o modelo e a conta padrão": "{0} ; l'app s'ouvre avec le modèle et le compte par défaut",
+  "{0}; o app abre com o modelo, o esforço e a permissão padrão": "{0} ; l'app s'ouvre avec le modèle, l'effort et l'autorisation par défaut",
   "modelo, esforço, permissão e conta só valem com o Habblaud rodando direto no computador (sem Docker)": "modèle, effort, autorisation et compte ne valent qu'avec Habblaud lancé directement sur l'ordinateur (sans Docker)",
 };

@@ -4,7 +4,8 @@
 //
 // Codex: sessão nova do Codex interativo na pasta (`codex -C <pasta> ...`, com modelo, esforço e modo de permissão
 // já conferidos em http/pty.ts; spawn/options.ts monta os argumentos). O terminal se liga ao agente do Codex que
-// aparece depois na mesma pasta e conta (os hooks rodam no daemon do Codex: não há como marcar a sessão por variável).
+// aparece depois na mesma pasta e conta, só quando não há dúvida (os hooks rodam no daemon do Codex: não há como
+// marcar a sessão por variável).
 //
 // Três usos: sessão nova numa pasta; "assumir" uma sessão aberta noutro terminal (o processo de lá é
 // encerrado e a mesma conversa continua aqui com `claude --resume`); e encerrar um agente, esteja ele aqui
@@ -81,11 +82,8 @@ export interface PtyManagerOptions {
   codexBin?: string;
   /** Contas do Codex (dir = CODEX_HOME). */
   codexAccounts?: () => PtyAccount[];
-  /**
-   * Agente principal do Codex que apareceu na pasta e conta depois de `since` e ainda não está ligado a um terminal
-   * (`taken`): é a sessão que o terminal abriu.
-   */
-  findCodexAgent?: (p: { cwd: string; account: string; since: number; taken: ReadonlySet<string> }) => string | undefined;
+  /** Agentes principais do Codex que apareceram na pasta e conta depois de `since` (candidatos a sessão do terminal). */
+  codexAgents?: (p: { cwd: string; account: string; since: number }) => string[];
   agent: (id: string) => PtyAgentRef | undefined;
   onChange: () => void;
   env?: NodeJS.ProcessEnv;
@@ -194,7 +192,7 @@ export interface CodexLaunch {
 }
 
 /** Quanto tempo depois de abrir o terminal do Codex a sessão dele ainda pode aparecer no escritório. */
-const CODEX_LINK_MS = 5 * 60_000;
+const CODEX_LINK_MS = 2 * 60_000;
 /** Folga do relógio: o agente pode marcar o início um pouco antes do terminal. */
 const CODEX_LINK_SLACK_MS = 5_000;
 
@@ -254,18 +252,27 @@ export class PtyManager {
     return this.spawn(this.plan(p, this.takeovers.size));
   }
 
-  /** Liga cada terminal do Codex ainda sem agente ao agente que apareceu na pasta dele. */
+  /**
+   * Liga cada terminal do Codex ainda sem agente ao agente que apareceu na pasta dele, só sem dúvida: um terminal
+   * esperando naquela pasta e conta e um agente novo, ainda sem terminal. Na dúvida fica sem ligar (o terminal
+   * funciona igual; só o cartão do agente não o abre).
+   * ponytail: casa por pasta, conta e horário; uma sessão do Codex aberta fora do Habblaud na mesma pasta no mesmo
+   * minuto ainda engana. Casar pelo PID quando os hooks do Codex o mandarem.
+   */
   private linkCodex(now: number): void {
-    const find = this.opts.findCodexAgent;
+    const find = this.opts.codexAgents;
     if (!find) return;
     const taken = new Set<string>();
     for (const t of this.ptys.values()) if (t.info.agentId) taken.add(t.info.agentId);
-    for (const t of this.ptys.values()) {
-      if (t.info.agent !== 'codex' || t.info.agentId || t.info.exitedAt !== undefined || now - t.info.startedAt > CODEX_LINK_MS) continue;
-      const id = find({ cwd: t.info.cwd, account: t.info.account, since: t.info.startedAt - CODEX_LINK_SLACK_MS, taken });
-      if (!id) continue;
-      t.info.agentId = id;
-      taken.add(id);
+    const waiting = [...this.ptys.values()].filter(
+      (t) => t.info.agent === 'codex' && !t.info.agentId && t.info.exitedAt === undefined && now - t.info.startedAt <= CODEX_LINK_MS,
+    );
+    for (const t of waiting) {
+      if (waiting.some((o) => o !== t && o.info.cwd === t.info.cwd && o.info.account === t.info.account)) continue;
+      const ids = find({ cwd: t.info.cwd, account: t.info.account, since: t.info.startedAt - CODEX_LINK_SLACK_MS }).filter((id) => !taken.has(id));
+      if (ids.length !== 1) continue;
+      t.info.agentId = ids[0];
+      taken.add(ids[0]);
     }
   }
 
