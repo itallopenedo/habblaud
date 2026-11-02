@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseLaunchctlPrint, plistFile, reloadCommand, renderPlist, SERVICE_LABEL, servicePath, waitForRestart } from '../../scripts/native-service';
+import { parseLaunchctlPrint, plistFile, reloadCommand, renderPlist, SERVICE_LABEL, serviceLang, servicePath, waitForRestart } from '../../scripts/native-service';
 import { tempDir } from './fixtures';
 
 const spec = { root: '/Users/ana/habblaud', home: '/Users/ana', node: '/Users/ana/.local/share/fnm/node-versions/v24.21.0/installation/bin/node' };
@@ -26,6 +26,16 @@ describe('serviço nativo (LaunchAgent)', () => {
     expect(p).toContain('<string>/Users/ana/.habblaud/logs/habblaud.error.log</string>');
     // Segredos e opções ficam no .env, nunca no plist.
     expect(p).not.toMatch(/PASSWORD|REMOTE_USER|TAILNET/);
+  });
+
+  it('idioma do serviço: o LANG de quem instalou quando termina em .UTF-8, senão en_US.UTF-8', () => {
+    expect(serviceLang('pt_BR.UTF-8')).toBe('pt_BR.UTF-8');
+    expect(serviceLang('fr_FR.UTF-8')).toBe('fr_FR.UTF-8');
+    for (const bad of [undefined, '', 'C', 'POSIX', 'pt_BR.ISO8859-1', 'pt_BR.UTF-8; rm -rf /', '<x>.UTF-8']) expect(serviceLang(bad)).toBe('en_US.UTF-8');
+    const p = renderPlist({ ...spec, lang: 'pt_BR.UTF-8' });
+    expect(p).toContain('<key>LANG</key><string>pt_BR.UTF-8</string>');
+    expect(p).toContain('<key>LC_CTYPE</key><string>pt_BR.UTF-8</string>');
+    expect(renderPlist({ ...spec, lang: 'C' })).toContain('<key>LANG</key><string>en_US.UTF-8</string>');
   });
 
   it('PATH: a pasta do Node primeiro, depois ~/.local/bin (claude, codex) e o Homebrew (whisper-cli, ffmpeg)', () => {
@@ -67,6 +77,9 @@ exit 0
 `,
       );
       chmodSync(bin, 0o755);
+      // sleep de mentira (a pasta do launchctl vem primeiro no PATH): as esperas de 1 s não atrasam o teste.
+      writeFileSync(join(tmp.dir, 'sleep'), '#!/bin/sh\nexit 0\n');
+      chmodSync(join(tmp.dir, 'sleep'), 0o755);
       const run = (tries: number) => {
         const [cmd, args] = reloadCommand('gui/501', '/p/x y.plist', join(tmp.dir, 'err.log'), tries);
         const r = spawnSync(cmd, args, { env: { PATH: `${tmp.dir}:/usr/bin:/bin` }, encoding: 'utf8' });
@@ -89,6 +102,8 @@ exit 0
         'bootstrap gui/501 /p/x y.plist',
       ]);
       expect(r.err).toMatch(/Input\/output error/);
+      // Subiu: nenhum aviso de falha no log.
+      expect(r.err).not.toMatch(/native:install/);
     });
 
     it('a espera tem limite: com o serviço que não some, tenta o bootstrap mesmo assim; falhando sempre, sai com erro', () => {
@@ -97,7 +112,19 @@ exit 0
       f.cleanup();
       expect(r.status).not.toBe(0);
       expect(r.calls.filter((c) => c.startsWith('print'))).toHaveLength(2);
-      expect(r.calls.filter((c) => c.startsWith('bootstrap'))).toHaveLength(3);
+      // 10 tentativas de bootstrap (1 s entre elas) e, esgotadas, uma linha com data no log de erro.
+      expect(r.calls.filter((c) => c.startsWith('bootstrap'))).toHaveLength(10);
+      const last = r.err.trim().split('\n').pop();
+      expect(last).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\S* native:install: não deu para religar o serviço; rode npm run native:install de novo$/);
+    });
+
+    it('o bootstrap que dá certo na última tentativa (a 10ª) ainda vale', () => {
+      const f = fakeLaunchctl(0, 9);
+      const r = f.run(2);
+      f.cleanup();
+      expect(r.status).toBe(0);
+      expect(r.calls.filter((c) => c.startsWith('bootstrap'))).toHaveLength(10);
+      expect(r.err).not.toMatch(/native:install/);
     });
 
     it('só aceita o servidor que subiu depois da reinstalação (outro processo na porta não conta)', async () => {

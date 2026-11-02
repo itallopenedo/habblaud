@@ -18,6 +18,7 @@ export const SERVICE_LABEL = 'com.pnd.habblaud';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = process.env.HOME || homedir();
 const WAIT_S = 40;
+const BOOTSTRAP_TRIES = 10;
 
 export interface ServiceSpec {
   /** Pasta do projeto (package.json, .env e dist/). */
@@ -25,6 +26,13 @@ export interface ServiceSpec {
   home: string;
   /** Node absoluto (caminho real). */
   node: string;
+  /** O LANG de quem instala (ver serviceLang). */
+  lang?: string;
+}
+
+/** Idioma do serviço: o LANG de quem instalou, se for algo como pt_BR.UTF-8 (o launchd começa no locale C); senão en_US.UTF-8. */
+export function serviceLang(lang: string | undefined): string {
+  return lang && /^[A-Za-z]{2,3}(_[A-Za-z0-9]+)?\.UTF-8$/.test(lang) ? lang : 'en_US.UTF-8';
 }
 
 /** PATH do serviço: o launchd começa quase vazio; o Node dele e onde ficam claude, codex, whisper-cli e ffmpeg. */
@@ -53,8 +61,8 @@ export function renderPlist(spec: ServiceSpec): string {
     ['HOME', spec.home],
     ['HABBLAUD_PTY', '1'],
     // O launchd começa no locale C: sem isto o terminal interativo perde acentos e emojis.
-    ['LANG', 'en_US.UTF-8'],
-    ['LC_CTYPE', 'en_US.UTF-8'],
+    ['LANG', serviceLang(spec.lang)],
+    ['LC_CTYPE', serviceLang(spec.lang)],
   ];
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -85,8 +93,10 @@ export function parseLaunchctlPrint(text: string): { running: boolean; pid?: num
 
 /**
  * Troca o serviço num shell à parte: bootout, espera o `launchctl print` falhar (até `tries` × 0,5 s) e bootstrap, com
- * até 3 tentativas (logo depois do bootout ele às vezes dá "Bootstrap failed: 5: Input/output error"). Os erros do
- * bootstrap vão para `errLog`. Argumentos posicionais: nenhum caminho passa pela interpretação do shell.
+ * até 10 tentativas, 1 s entre elas (logo depois do bootout ele às vezes dá "Bootstrap failed: 5: Input/output error").
+ * Os erros do bootstrap vão para `errLog`; se todas as tentativas falham, uma linha com a data diz o que fazer (o
+ * instalador pode já ter saído: é o único aviso que sobra). Argumentos posicionais: nenhum caminho passa pela
+ * interpretação do shell.
  */
 export function reloadCommand(domain: string, plist: string, errLog: string, tries = 20): [string, string[]] {
   const script = [
@@ -94,9 +104,10 @@ export function reloadCommand(domain: string, plist: string, errLog: string, tri
     'i=0',
     `while [ "$i" -lt "$4" ] && launchctl print "$1/${SERVICE_LABEL}" >/dev/null 2>&1; do i=$((i+1)); sleep 0.5; done`,
     'n=0',
-    'until launchctl bootstrap "$1" "$2" >/dev/null 2>>"$3"; do n=$((n+1)); [ "$n" -ge 3 ] && exit 1; sleep 1; done',
+    `until launchctl bootstrap "$1" "$2" >/dev/null 2>>"$3"; do n=$((n+1)); if [ "$n" -ge ${BOOTSTRAP_TRIES} ]; then echo "$(date '+%Y-%m-%dT%H:%M:%S%z') $5" >> "$3"; exit 1; fi; sleep 1; done`,
   ].join('\n');
-  return ['/bin/sh', ['-c', script, 'habblaud-reload', domain, plist, errLog, String(tries)]];
+  const failed = tr('native:install: não deu para religar o serviço; rode npm run native:install de novo');
+  return ['/bin/sh', ['-c', script, 'habblaud-reload', domain, plist, errLog, String(tries), failed]];
 }
 
 /**
@@ -182,7 +193,7 @@ async function install(): Promise<number> {
     return 1;
   }
   renewRemoteCert(env);
-  const spec: ServiceSpec = { root: ROOT, home: HOME, node: realpathSync(process.execPath) };
+  const spec: ServiceSpec = { root: ROOT, home: HOME, node: realpathSync(process.execPath), lang: process.env.LANG };
   const logs = logFiles(HOME);
   mkdirSync(dirname(logs.out), { recursive: true });
   mkdirSync(dirname(plistFile(HOME)), { recursive: true });

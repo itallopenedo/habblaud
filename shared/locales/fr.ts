@@ -3370,4 +3370,5 @@ export const FR: Readonly<Record<string, string>> = {
   "{0} · responda pelos botões na gaveta do agente ou no Claude Desktop": "{0} · répondez avec les boutons du panneau de l'agent ou dans Claude Desktop",
   "{0} · responda no Claude Desktop": "{0} · répondez dans Claude Desktop",
   "Anexos antigos apagados: {0} (mais de 7 dias, em {1}).": "Pièces jointes anciennes supprimées : {0} (plus de 7 jours, dans {1}).",
+  "native:install: não deu para religar o serviço; rode npm run native:install de novo": "native:install : impossible de relancer le service ; relancez npm run native:install",
 };
