@@ -29,6 +29,10 @@ do meio (0.**3**.0).
 
 ### Adicionado
 
+- **Habblaud como serviço no macOS (`npm run native:install`).** Faz o build e instala um LaunchAgent que mantém o
+  Habblaud rodando sem o Docker, com o terminal interativo ligado (`HABBLAUD_PTY=1`), o mesmo `.env` do projeto e logs
+  em `~/.habblaud/logs/`. `npm run native:status` mostra o estado e `npm run native:uninstall` tira o serviço (o Docker
+  continua funcionando com `npm run docker:up`).
 - **Foto ou arquivo na mensagem.** A caixa de mensagem (na gaveta e no terminal) ganhou o clipe: no iPhone, câmera,
   fotos ou arquivos. Também dá para colar (⌘V no Mac, "Colar" no iPhone) ou arrastar qualquer arquivo para a caixa:
   foto, vídeo, PDF, áudio. Os arquivos vão para `~/.habblaud/attachments` no Mac (no Docker, gravados pelo

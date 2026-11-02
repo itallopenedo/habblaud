@@ -1,0 +1,202 @@
+// npm run native:install | native:uninstall | native:status — o Habblaud como serviço do macOS (LaunchAgent), no lugar
+// do Docker: `node --env-file-if-exists=<projeto>/.env dist/server/index.js`, com KeepAlive, o Node absoluto de quem
+// instalou (o caminho real, não o atalho temporário do fnm), HABBLAUD_PTY=1 (terminal interativo) e logs em
+// ~/.habblaud/logs/. O .env é lido pelo próprio Node a cada início: senha e opções não vão para o plist. Atualizar =
+// rodar native:install de novo (faz o build e reinicia). O Docker continua funcionando (npm run docker:up); só não
+// rode os dois ao mesmo tempo (a porta é a mesma).
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, userInfo } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readEnvValue } from '../server/remote/envfile';
+import { ensureServerCert, remoteTargets, remoteTlsBase, tlsPaths } from '../server/remote/tls';
+import { tr } from '../shared/i18n';
+
+export const SERVICE_LABEL = 'com.pnd.habblaud';
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const HOME = process.env.HOME || homedir();
+const WAIT_S = 30;
+
+export interface ServiceSpec {
+  /** Pasta do projeto (package.json, .env e dist/). */
+  root: string;
+  home: string;
+  /** Node absoluto (caminho real). */
+  node: string;
+}
+
+/** PATH do serviço: o launchd começa quase vazio; o Node dele e onde ficam claude, codex, whisper-cli e ffmpeg. */
+export function servicePath(spec: Pick<ServiceSpec, 'home' | 'node'>): string {
+  return [dirname(spec.node), join(spec.home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(':');
+}
+
+export function logFiles(home: string): { out: string; err: string } {
+  const dir = join(home, '.habblaud', 'logs');
+  return { out: join(dir, 'habblaud.log'), err: join(dir, 'habblaud.error.log') };
+}
+
+export function plistFile(home: string): string {
+  return join(home, 'Library', 'LaunchAgents', `${SERVICE_LABEL}.plist`);
+}
+
+function xml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+export function renderPlist(spec: ServiceSpec): string {
+  const logs = logFiles(spec.home);
+  const args = [spec.node, `--env-file-if-exists=${join(spec.root, '.env')}`, join(spec.root, 'dist', 'server', 'index.js')];
+  const env: Array<[string, string]> = [
+    ['PATH', servicePath(spec)],
+    ['HOME', spec.home],
+    ['HABBLAUD_PTY', '1'],
+  ];
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${SERVICE_LABEL}</string>
+  <key>WorkingDirectory</key><string>${xml(spec.root)}</string>
+  <key>ProgramArguments</key>
+  <array>${args.map((a) => `<string>${xml(a)}</string>`).join('')}</array>
+  <key>EnvironmentVariables</key>
+  <dict>${env.map(([k, v]) => `<key>${k}</key><string>${xml(v)}</string>`).join('')}</dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>${xml(logs.out)}</string>
+  <key>StandardErrorPath</key><string>${xml(logs.err)}</string>
+</dict>
+</plist>
+`;
+}
+
+/** Estado no `launchctl print gui/<uid>/<label>`. */
+export function parseLaunchctlPrint(text: string): { running: boolean; pid?: number } {
+  const state = /^\s*state = (\S+)/m.exec(text)?.[1];
+  const pid = Number(/^\s*pid = (\d+)/m.exec(text)?.[1]);
+  return { running: state === 'running', ...(Number.isInteger(pid) && pid > 0 ? { pid } : {}) };
+}
+
+interface Health {
+  version?: string;
+  docker?: boolean;
+  pty?: boolean;
+}
+
+async function health(port: number): Promise<Health | undefined> {
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2_000) });
+    return r.ok ? ((await r.json()) as Health) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function envText(): string {
+  try {
+    return readFileSync(join(ROOT, '.env'), 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+function portOf(env: string): number {
+  const raw = Number.parseInt(process.env.HABBLAUD_PORT ?? readEnvValue(env, 'HABBLAUD_PORT') ?? '', 10);
+  return Number.isInteger(raw) && raw > 0 && raw < 65536 ? raw : 4747;
+}
+
+const target = () => `gui/${process.getuid?.() ?? userInfo().uid}`;
+const launchctl = (...args: string[]) => spawnSync('launchctl', args, { encoding: 'utf8' });
+
+/** Como no docker:up: com o acesso remoto ligado, refaz o certificado do servidor se o IP mudou ou se está perto de vencer. */
+function renewRemoteCert(env: string): void {
+  if (!readEnvValue(env, 'HABBLAUD_REMOTE_USER')) return;
+  const paths = tlsPaths(remoteTlsBase(HOME));
+  if (!existsSync(paths.caCert)) return;
+  try {
+    const r = ensureServerCert(paths, remoteTargets({ name: readEnvValue(env, 'HABBLAUD_REMOTE_NAME'), domain: readEnvValue(env, 'HABBLAUD_REMOTE_DOMAIN') }));
+    if (r.issued) console.log(tr('Acesso remoto: certificado do servidor renovado ({0}).', [r.reason]));
+  } catch (err) {
+    console.warn(tr('acesso remoto: não consegui conferir o certificado ({0}).', [(err as Error).message]));
+  }
+}
+
+async function install(): Promise<number> {
+  const env = envText();
+  const port = portOf(env);
+  if (!existsSync(join(ROOT, 'dist', 'server', 'index.js'))) {
+    console.error(tr('Falta o build (dist/server/index.js): rode npm run native:install, que faz o build antes.'));
+    return 1;
+  }
+  if ((await health(port))?.docker) {
+    console.error(tr('A porta {0} está com o Habblaud do Docker. Pare o container antes: docker stop habblaud', [port]));
+    return 1;
+  }
+  renewRemoteCert(env);
+  const spec: ServiceSpec = { root: ROOT, home: HOME, node: realpathSync(process.execPath) };
+  const logs = logFiles(HOME);
+  mkdirSync(dirname(logs.out), { recursive: true });
+  mkdirSync(dirname(plistFile(HOME)), { recursive: true });
+  writeFileSync(plistFile(HOME), renderPlist(spec), { mode: 0o644 });
+  launchctl('bootout', `${target()}/${SERVICE_LABEL}`);
+  const r = launchctl('bootstrap', target(), plistFile(HOME));
+  if (r.status !== 0) {
+    console.error(tr('não consegui ligar o serviço: {0}', [String(r.stderr).trim()]));
+    return 1;
+  }
+  console.log(tr('Serviço {0} instalado ({1}). Esperando o Habblaud em http://127.0.0.1:{2}…', [SERVICE_LABEL, plistFile(HOME), port]));
+  for (let i = 0; i < WAIT_S; i++) {
+    const h = await health(port);
+    if (h && !h.docker) {
+      console.log(tr('Habblaud {0} no ar; terminal interativo: {1}. Log: {2}', [h.version ?? '?', h.pty ? tr('ligado') : tr('desligado (veja o log)'), logs.out]));
+      return 0;
+    }
+    await new Promise((ok) => setTimeout(ok, 1_000));
+  }
+  console.error(tr('O Habblaud não respondeu em {0} s: veja {1}', [WAIT_S, logs.err]));
+  return 1;
+}
+
+function uninstall(): number {
+  launchctl('bootout', `${target()}/${SERVICE_LABEL}`);
+  rmSync(plistFile(HOME), { force: true });
+  console.log(tr('Serviço {0} removido. Para voltar ao Docker: npm run docker:up', [SERVICE_LABEL]));
+  return 0;
+}
+
+async function status(): Promise<number> {
+  if (!existsSync(plistFile(HOME))) {
+    console.log(tr('Serviço {0}: não instalado (npm run native:install).', [SERVICE_LABEL]));
+    return 1;
+  }
+  const st = parseLaunchctlPrint(launchctl('print', `${target()}/${SERVICE_LABEL}`).stdout ?? '');
+  const h = await health(portOf(envText()));
+  console.log(tr('Serviço {0}: {1}', [SERVICE_LABEL, st.running ? tr('rodando (pid {0})', [st.pid ?? '?']) : tr('parado')]));
+  console.log(
+    h
+      ? tr('Habblaud {0}: Docker {1}, terminal interativo {2}.', [h.version ?? '?', h.docker ? tr('ligado') : tr('desligado'), h.pty ? tr('ligado') : tr('desligado')])
+      : tr('o Habblaud não respondeu'),
+  );
+  console.log(tr('Log: {0}', [logFiles(HOME).out]));
+  return st.running && h && !h.docker ? 0 : 1;
+}
+
+async function main(): Promise<void> {
+  if (process.platform !== 'darwin') {
+    console.error(tr('O serviço nativo (LaunchAgent) só existe no macOS; nos outros sistemas use npm start ou npm run docker:up.'));
+    process.exitCode = 1;
+    return;
+  }
+  const cmd = process.argv[2];
+  if (cmd === 'install') process.exitCode = await install();
+  else if (cmd === 'uninstall') process.exitCode = uninstall();
+  else if (cmd === 'status') process.exitCode = await status();
+  else {
+    console.error('npm run native:install | native:uninstall | native:status');
+    process.exitCode = 1;
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) void main();

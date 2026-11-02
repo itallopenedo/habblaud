@@ -3329,4 +3329,17 @@ export const FR: Readonly<Record<string, string>> = {
 
   // Fase 5 — terminal
   "fora das pastas de projeto": "hors des dossiers de projet",
+  "Falta o build (dist/server/index.js): rode npm run native:install, que faz o build antes.": "Le build manque (dist/server/index.js) : lancez npm run native:install, qui fait le build avant.",
+  "A porta {0} está com o Habblaud do Docker. Pare o container antes: docker stop habblaud": "Le port {0} est pris par le Habblaud de Docker. Arrêtez d'abord le conteneur : docker stop habblaud",
+  "Serviço {0} instalado ({1}). Esperando o Habblaud em http://127.0.0.1:{2}…": "Service {0} installé ({1}). Attente de Habblaud sur http://127.0.0.1:{2}…",
+  "Habblaud {0} no ar; terminal interativo: {1}. Log: {2}": "Habblaud {0} est lancé ; terminal interactif : {1}. Journal : {2}",
+  "desligado (veja o log)": "désactivé (voir le journal)",
+  "O Habblaud não respondeu em {0} s: veja {1}": "Habblaud n'a pas répondu en {0} s : voir {1}",
+  "Serviço {0} removido. Para voltar ao Docker: npm run docker:up": "Service {0} supprimé. Pour revenir à Docker : npm run docker:up",
+  "Serviço {0}: não instalado (npm run native:install).": "Service {0} : non installé (npm run native:install).",
+  "Serviço {0}: {1}": "Service {0} : {1}",
+  "rodando (pid {0})": "en cours (pid {0})",
+  "Habblaud {0}: Docker {1}, terminal interativo {2}.": "Habblaud {0} : Docker {1}, terminal interactif {2}.",
+  "Log: {0}": "Journal : {0}",
+  "O serviço nativo (LaunchAgent) só existe no macOS; nos outros sistemas use npm start ou npm run docker:up.": "Le service natif (LaunchAgent) n'existe que sur macOS ; sur les autres systèmes, utilisez npm start ou npm run docker:up.",
 };
