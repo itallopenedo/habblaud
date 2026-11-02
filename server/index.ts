@@ -43,7 +43,7 @@ import { getLocale, tr } from '../shared/i18n';
 import type { WorldLocale } from '../shared/world/protocol';
 import { createCliRunner, createOpener, SpawnService } from './spawn/spawn';
 import { runnableClaudeBin } from './claude-bin';
-import { AttachmentStore, attachmentsRoot, writeAttachments } from './spawn/attachments';
+import { AttachmentStore, attachmentsRoot, writeMessageAttachments } from './spawn/attachments';
 import { HostFileWriter } from './spawn/host-writer';
 import { recentFolders } from './spawn/folders';
 import { isDemoId } from '../shared/timeline';
@@ -281,7 +281,7 @@ const messages = config.messages
       },
       attachments,
       // Modo Node: o próprio servidor grava em ~/.habblaud/attachments; no Docker, o auxiliar do host.
-      writeFiles: attachmentWriter ? (_id, files) => attachmentWriter.write(files) : async (id, files) => writeAttachments(attachmentsRoot(), id, files),
+      writeFiles: attachmentWriter ? (_id, files) => attachmentWriter.write(files) : async (_id, files) => writeMessageAttachments(attachmentsRoot(), files),
     })
   : undefined;
 late.messages = messages;

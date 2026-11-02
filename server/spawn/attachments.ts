@@ -138,6 +138,11 @@ export function writeAttachments(root: string, spawnId: string, files: readonly 
   });
 }
 
+/** Anexos de uma mensagem: pasta própria a cada envio (o id da mensagem muda só no fim: duas fotos `image.jpg` no mesmo segundo colidiam). */
+export function writeMessageAttachments(root: string, files: readonly Attachment[]): string[] {
+  return writeAttachments(root, randomUUID(), files);
+}
+
 /** O pedido com a lista dos anexos no fim (o agente lê os arquivos pelos caminhos). */
 export function promptWithAttachments(prompt: string, paths: readonly string[]): string {
   if (!paths.length) return prompt;

@@ -360,7 +360,7 @@ export class MessageRegistry {
     const out: InboxMessage[] = [];
     for (const e of this.messages.values()) {
       if (out.length >= INBOX_BATCH) break;
-      if (e.staging && e.msg.agentId === agent.id) break; // gravando o anexo: ela e as seguintes esperam (a ordem vale)
+      if (e.staging && e.msg.status === 'queued' && e.msg.agentId === agent.id) break; // gravando o anexo: ela e as seguintes esperam (a ordem vale)
       if (e.demo || e.codex || e.msg.agentId !== agent.id || e.msg.status !== 'queued' || e.target !== session) continue;
       if (e.questionId && this.opts.desktopAnswer?.(agent.id, e.questionId, e.option!) !== e.text) {
         this.fail(e, now, ERR_DESKTOP_CHANGED);
@@ -494,11 +494,16 @@ export class MessageRegistry {
       this.opts.attachments?.release(bytes);
       if (this.messages.get(e.msg.id) !== e || isFinal(e)) return;
       delete e.staging;
-      if ('error' in r) return this.fail(e, this.now(), r.error);
+      if ('error' in r) {
+        this.fail(e, this.now(), r.error);
+        this.pumpCodex(); // as mensagens seguintes que esperavam atrás desta saem já
+        return;
+      }
       e.text = promptWithAttachments(e.text, r.paths);
       if (e.codex) this.pumpCodex();
     };
-    this.opts.writeFiles!(e.msg.id, files).then(
+    // Promise.resolve().then: uma exceção síncrona de writeFiles também vira falha da mensagem.
+    Promise.resolve().then(() => this.opts.writeFiles!(e.msg.id, files)).then(
       (paths) => done({ paths }),
       (err: unknown) => done({ error: tr('não deu para gravar os anexos ({0})', [errMsg(err)]) }),
     );
@@ -563,6 +568,7 @@ export class MessageRegistry {
   private finish(e: Entry, status: 'delivered' | 'failed', now: number): void {
     this.setStatus(e, status, now);
     delete e.late;
+    delete e.staging;
     if (status === 'delivered') {
       delete e.msg.error;
       // A do demo vai para o agente fictício (Office.deliverDemoMessage).

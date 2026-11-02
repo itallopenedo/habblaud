@@ -250,6 +250,19 @@ describe('MessageRegistry: Codex pelo auxiliar do host (Docker)', () => {
     expect(registry.get(second)!.status).toBe('queued');
   });
 
+  it('anexo ao Codex (modo Node) que falha ao gravar: a mensagem falha e a seguinte sai logo', async () => {
+    const store = new AttachmentStore();
+    const m = manualRunner();
+    const { registry } = setup({ run: m.run }, { attachments: store, writeFiles: async () => { throw new Error('disco cheio'); } });
+    const { id: aid } = store.put({ name: 'tela.png', type: 'image/png', data: Buffer.from('png') }) as { id: string };
+    const first = sent(registry.send({ agentId: MAIN, text: 'veja', attachments: [aid] }));
+    const second = sent(registry.send({ agentId: MAIN, text: 'depois' }));
+    await new Promise((ok) => setImmediate(ok));
+    expect(registry.get(first)!.status).toBe('failed');
+    expect(m.jobs.map((j) => j.text)).toEqual(['depois']);
+    expect(registry.get(second)!.status).toBe('sent');
+  });
+
   it('sem entregador: o Codex não recebe (com o motivo); subagente do Codex também não', () => {
     let s = setup(null);
     expect(snapAgent(s.office, MAIN)!.canMessage).toBeUndefined();

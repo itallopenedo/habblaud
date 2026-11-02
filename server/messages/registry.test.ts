@@ -443,4 +443,33 @@ describe('MessageRegistry: anexos', () => {
     plain.registry.inbox({ session: SESSION });
     expect(plain.registry.send({ agentId: MAIN, text: 'oi', attachments: ['x'] })).toEqual({ error: 'unavailable', reason: 'anexos desligados' });
   });
+
+  it('writeFiles que nunca responde: a mensagem que o relógio falha não segura as seguintes do agente', async () => {
+    const store = new AttachmentStore();
+    const { registry, clock } = setup({ attachments: store, writeFiles: () => new Promise<string[]>(() => {}) });
+    registry.inbox({ session: SESSION });
+    const { id: aid } = store.put(file('a.jpg')) as { id: string };
+    const stuck = sent(registry.send({ agentId: MAIN, text: 'com anexo', attachments: [aid] }));
+    clock.advance(QUEUED_TIMEOUT_MS);
+    registry.tick();
+    expect(registry.get(stuck)).toMatchObject({ status: 'failed' });
+    registry.inbox({ session: SESSION }); // a presença da sessão venceu com o tempo
+    const next = sent(registry.send({ agentId: MAIN, text: 'sem anexo' }));
+    expect(registry.inbox({ session: SESSION })).toEqual([{ id: next, text: 'sem anexo' }]);
+  });
+
+  it('writeFiles que lança na hora: a mensagem falha com o motivo', async () => {
+    const store = new AttachmentStore();
+    const { registry } = setup({
+      attachments: store,
+      writeFiles: () => {
+        throw new Error('sem permissão');
+      },
+    });
+    registry.inbox({ session: SESSION });
+    const { id: aid } = store.put(file('a.jpg')) as { id: string };
+    const id = sent(registry.send({ agentId: MAIN, text: 'oi', attachments: [aid] }));
+    await flush();
+    expect(registry.get(id)).toMatchObject({ status: 'failed', error: 'não deu para gravar os anexos (sem permissão)' });
+  });
 });
