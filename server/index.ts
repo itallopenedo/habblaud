@@ -390,7 +390,9 @@ const api = createApiHandler({
   timeline: createTimelineHandler({ dir: timelineDir, recording: !!timeline }),
   permissions: permissions ? createPermissionRoutes(permissions) : undefined,
   messages: messages ? createMessageRoutes(messages) : undefined,
-  pty: ptys ? createPtyRoutes(ptys, { tailnet: isTailnetRequest }) : undefined,
+  pty: ptys
+    ? createPtyRoutes(ptys, { tailnet: isTailnetRequest, claim: (req, id) => void remoteSessions?.claim(readCookie(req.headers.cookie, COOKIE), id) })
+    : undefined,
   spawn,
   attachments,
   attachmentWriter,
@@ -414,6 +416,7 @@ const api = createApiHandler({
         allows: (f) => config.remote!.allow.has(f),
         tailnet: isTailnetRequest,
         confirmed: (req) => !!remoteSessions?.confirmedWithin(readCookie(req.headers.cookie, COOKIE), CONFIRM_MS),
+        owns: (req, id) => !!remoteSessions?.owns(readCookie(req.headers.cookie, COOKIE), id),
       }
     : undefined,
   world: world ? createWorldRoutes(world, worldViewer, worldSocial) : undefined,

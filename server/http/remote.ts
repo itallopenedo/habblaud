@@ -136,6 +136,11 @@ export class RemoteSessions {
   private readonly revoked = new Map<string, number>();
   /** Assinatura -> quando a senha foi conferida pela última vez com este token (login ou /api/remote/confirm). Só em memória. */
   private readonly confirmed = new Map<string, number>();
+  /**
+   * Assinatura -> terminais interativos que este token abriu, assumiu ou ligou com a senha recente: neles, teclas,
+   * tamanho e fechar não pedem a senha de novo. Só em memória; "Sair" apaga.
+   */
+  private readonly owned = new Map<string, { exp: number; ids: Set<string> }>();
 
   constructor(
     secret: Buffer,
@@ -176,6 +181,26 @@ export class RemoteSessions {
     return at !== undefined && this.now() - at < ms;
   }
 
+  /** Registra o terminal `ptyId` neste token, só com a senha conferida há pouco. */
+  claim(token: string | undefined, ptyId: string): boolean {
+    const parsed = this.parse(token);
+    if (!parsed || this.revoked.has(parsed.sig) || !this.confirmedWithin(token, CONFIRM_MS)) return false;
+    const now = this.now();
+    for (const [sig, o] of this.owned) if (o.exp <= now) this.owned.delete(sig);
+    const entry = this.owned.get(parsed.sig) ?? { exp: parsed.exp, ids: new Set<string>() };
+    entry.ids.add(ptyId);
+    // ponytail: teto simples por token (os mais antigos saem primeiro); terminais já fechados ficam até lá.
+    if (entry.ids.size > 64) entry.ids.delete(entry.ids.values().next().value!);
+    this.owned.set(parsed.sig, entry);
+    return true;
+  }
+
+  /** O terminal `ptyId` foi aberto, assumido ou ligado por este token com a senha recente. */
+  owns(token: string | undefined, ptyId: string): boolean {
+    const parsed = this.parse(token);
+    return !!parsed && !this.revoked.has(parsed.sig) && !!this.owned.get(parsed.sig)?.ids.has(ptyId);
+  }
+
   private markConfirmed(sig: string): void {
     const now = this.now();
     for (const [s, at] of this.confirmed) if (now - at >= CONFIRM_MS) this.confirmed.delete(s);
@@ -194,6 +219,8 @@ export class RemoteSessions {
     const now = this.now();
     for (const [sig, exp] of this.revoked) if (exp <= now) this.revoked.delete(sig);
     this.revoked.set(parsed.sig, parsed.exp);
+    this.owned.delete(parsed.sig);
+    this.confirmed.delete(parsed.sig);
     this.saveRevoked();
   }
 

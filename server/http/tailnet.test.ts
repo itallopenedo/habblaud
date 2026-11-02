@@ -4,14 +4,16 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { setQuiet } from '../log';
-import { createTailnetGate, DEFAULT_TAILNET_PORT, isTailnetRequest, parseTailnetConfig, ptyNeedsConfirm, startTailnetListener } from './tailnet';
+import { createTailnetGate, DEFAULT_TAILNET_PORT, isTailnetRequest, parseTailnetConfig, ptyRemoteNeeds, startTailnetListener } from './tailnet';
 import { AccountsService } from '../accounts/service';
 import { NameStore } from '../model/names';
 import { Office } from '../model/office';
 import { hashPassword, parsePasswordHash } from '../remote/password';
+import { PtyError, type PtyManager } from '../pty/manager';
 import { tempDir } from '../test/fixtures';
 import { createApiHandler, sendJson } from './app';
 import { createRequestGuard } from './guard';
+import { createPtyRoutes } from './pty';
 import { CONFIRM_MS, COOKIE, createRemoteGate, isRemoteRequest, LoginThrottle, readCookie, RemoteSessions, type RemoteFeature } from './remote';
 import { Hub } from './sse';
 import { TerminalStreams } from './terminal';
@@ -73,15 +75,29 @@ describe('porta da tailnet: escuta e cabeçalho do Tailscale', () => {
     expect(marked).toEqual([true]);
   });
 
-  it('ptyNeedsConfirm: abrir, assumir, encerrar e o stream; a lista, digitar, redimensionar e fechar não', () => {
-    expect(ptyNeedsConfirm('POST', '/api/pty')).toBe(true);
-    expect(ptyNeedsConfirm('POST', '/api/agents/acc%3A1/takeover')).toBe(true);
-    expect(ptyNeedsConfirm('POST', '/api/agents/acc%3A1/stop')).toBe(true);
-    expect(ptyNeedsConfirm('GET', '/api/pty/p1/stream')).toBe(true);
-    expect(ptyNeedsConfirm('GET', '/api/pty')).toBe(false);
-    expect(ptyNeedsConfirm('POST', '/api/pty/p1/input')).toBe(false);
-    expect(ptyNeedsConfirm('POST', '/api/pty/p1/resize')).toBe(false);
-    expect(ptyNeedsConfirm('POST', '/api/pty/p1/close')).toBe(false);
+  it('ptyRemoteNeeds: a lista não pede nada; teclas, tamanho e fechar pedem o terminal ser da sessão; o resto, a senha', () => {
+    expect(ptyRemoteNeeds('GET', '/api/pty')).toBeNull();
+    expect(ptyRemoteNeeds('POST', '/api/pty/p1/input')).toEqual({ owner: 'p1' });
+    expect(ptyRemoteNeeds('POST', '/api/pty/a%3Ab/resize')).toEqual({ owner: 'a:b' });
+    expect(ptyRemoteNeeds('POST', '/api/pty/p1/close')).toEqual({ owner: 'p1' });
+    for (const [m, p] of [
+      ['POST', '/api/pty'],
+      ['POST', '/api/agents/acc%3A1/takeover'],
+      ['POST', '/api/agents/acc%3A1/stop'],
+      ['GET', '/api/pty/p1/stream'],
+      // Variantes do caminho: falha fechado (pedem a senha).
+      ['POST', '/api/pty/'],
+      ['POST', '/api/pty//'],
+      ['GET', '/api/pty/p1/stream/'],
+      ['GET', '/api/pty//p1/stream'],
+      ['GET', '/api/pty/p1/stream/x'],
+      ['GET', '/api/pty/'],
+      ['HEAD', '/api/pty'],
+      ['POST', '/api/pty/p1/input/'],
+      ['POST', '/api/pty//p1/input'],
+      ['GET', '/api/pty/p1/input'],
+      ['POST', '/api/pty/%E0%A4%A/input'],
+    ]) expect(ptyRemoteNeeds(m, p), `${m} ${p}`).toBe('confirm');
   });
 });
 
@@ -93,7 +109,42 @@ const TS_HOST = 'mac.tail.ts.net:8443';
 const TS = { Host: TS_HOST, 'Tailscale-User-Login': 'ana@example.com' };
 
 /** Porta do celular na rede (LAN) e porta da tailnet sobre a MESMA API, sessões e freio, como no server/index.ts. */
-async function start(allow: RemoteFeature[]) {
+/** PtyManager de mentira para o roteador de verdade (createPtyRoutes): m1 e m2 foram abertos no Mac. */
+function fakePtys(calls: string[]): PtyManager {
+  const known = new Set(['m1', 'm2']);
+  let n = 0;
+  const get = (id: string) => {
+    if (!known.has(id)) throw new PtyError(404, 'terminal não encontrado');
+  };
+  return {
+    status: () => ({ enabled: true }),
+    list: () => [...known].map((id) => ({ id })),
+    create: () => {
+      const id = `p${++n}`;
+      known.add(id);
+      calls.push(`create ${id}`);
+      return { id };
+    },
+    takeover: async (agentId: string) => {
+      const id = `p${++n}`;
+      known.add(id);
+      calls.push(`takeover ${agentId} ${id}`);
+      return { id };
+    },
+    stop: async (agentId: string) => void calls.push(`stop ${agentId}`),
+    attach: (id: string, _req: http.IncomingMessage, res: http.ServerResponse) => {
+      get(id);
+      calls.push(`attach ${id}`);
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end('retry: 2000\n\n');
+    },
+    input: (id: string) => (get(id), void calls.push(`input ${id}`)),
+    resize: (id: string) => (get(id), void calls.push(`resize ${id}`)),
+    close: (id: string) => (get(id), void calls.push(`close ${id}`)),
+  } as unknown as PtyManager;
+}
+
+async function start(allow: RemoteFeature[], opts: { realPty?: boolean } = {}) {
   let clock = Date.now();
   const tmp = tempDir();
   const dir = join(tmp.dir, '.claude');
@@ -123,15 +174,18 @@ async function start(allow: RemoteFeature[]) {
     permissions: ok,
     messages: ok,
     world: (req, res) => ok(req, res),
-    pty: (req, res, path) => {
-      ptyCalls.push(`${req.method} ${path}`);
-      ok(req, res);
-    },
+    pty: opts.realPty
+      ? createPtyRoutes(fakePtys(ptyCalls), { tailnet: isTailnetRequest, claim: (req, id) => void sessions.claim(readCookie(req.headers.cookie, COOKIE), id) })
+      : (req, res, path) => {
+          ptyCalls.push(`${req.method} ${path}`);
+          ok(req, res);
+        },
     remote: {
       is: isRemoteRequest,
       allows: (f) => allowSet.has(f),
       tailnet: isTailnetRequest,
       confirmed: (req) => sessions.confirmedWithin(readCookie(req.headers.cookie, COOKIE), CONFIRM_MS),
+      owns: (req, id) => sessions.owns(readCookie(req.headers.cookie, COOKIE), id),
     },
   });
   const guard = createRequestGuard({ allowedHosts: new Set(['mac.tail.ts.net']) });
@@ -252,18 +306,31 @@ describe('terminal interativo: LAN x tailnet', () => {
     expect(JSON.parse((await request(s.tsBase, '/api/access', { headers: h })).body).pty).toBe(true);
   });
 
-  it('senha conferida há mais de 10 min: abrir, assumir, encerrar e a tela pedem a senha (401 reauth); a lista e digitar não; confirmar libera', async () => {
+  it('senha conferida há mais de 10 min: abrir, assumir, encerrar, a tela e digitar num terminal que não é da sessão pedem a senha (401 reauth); a lista não; confirmar libera', async () => {
     const s = await start(['permissions', 'terminal', 'pty']);
     const { cookie } = await login(s.tsBase, TS);
     const h = { ...TS, Cookie: cookie };
     s.advance(CONFIRM_MS + 1);
-    for (const r of [PTY_ROUTES[1], PTY_ROUTES[3], PTY_ROUTES[4], PTY_ROUTES[5]]) {
+    const stale: Array<[string, string]> = [
+      PTY_ROUTES[1],
+      PTY_ROUTES[2],
+      PTY_ROUTES[3],
+      PTY_ROUTES[4],
+      PTY_ROUTES[5],
+      // Variantes do caminho não pulam a senha.
+      ['POST', '/api/pty/'],
+      ['POST', '/api/pty//'],
+      ['GET', '/api/pty/p1/stream/'],
+      ['GET', '/api/pty//p1/stream'],
+      ['GET', '/api/pty/p1/stream/x'],
+    ];
+    for (const r of stale) {
       const res = await call(s.tsBase, r, h);
       expect(res.status, r.join(' ')).toBe(401);
-      expect(JSON.parse(res.body).code).toBe('reauth');
+      expect(JSON.parse(res.body).code, r.join(' ')).toBe('reauth');
     }
+    expect(s.ptyCalls).toEqual([]);
     expect((await call(s.tsBase, PTY_ROUTES[0], h)).status).toBe(200);
-    expect((await call(s.tsBase, PTY_ROUTES[2], h)).status).toBe(200);
     expect((await request(s.tsBase, '/api/remote/confirm', { method: 'POST', body: { password: 'errada' }, headers: h })).status).toBe(401);
     expect((await request(s.tsBase, '/api/remote/confirm', { method: 'POST', body: { password: PASSWORD }, headers: h })).status).toBe(200);
     expect((await call(s.tsBase, PTY_ROUTES[1], h)).status).toBe(200);
@@ -304,6 +371,76 @@ describe('terminal interativo: LAN x tailnet', () => {
     const { cookie } = await login(s.tsBase, TS);
     const r = await request(s.tsBase, '/api/pty', { method: 'POST', body: {}, headers: { ...TS, Cookie: cookie, Origin: 'https://evil.example' } });
     expect(r.status).toBe(403);
+    expect(s.ptyCalls).toEqual([]);
+  });
+});
+
+describe('terminal interativo pela tailnet com o roteador de verdade (createPtyRoutes)', () => {
+  it('senha vencida: nenhuma variante do caminho chega ao terminal; com a senha recente, as variantes dão 404', async () => {
+    const s = await start(['permissions', 'terminal', 'pty'], { realPty: true });
+    const { cookie } = await login(s.tsBase, TS);
+    const h = { ...TS, Cookie: cookie };
+    const variants: Array<[string, string]> = [
+      ['POST', '/api/pty/'],
+      ['POST', '/api/pty//'],
+      ['GET', '/api/pty/m1/stream/'],
+      ['GET', '/api/pty//m1/stream'],
+      ['GET', '/api/pty/m1/stream/x'],
+      ['POST', '/api/pty/m1/input/'],
+      ['POST', '/api/pty//m1/input'],
+      ['POST', '/api/pty/m1'],
+    ];
+    for (const r of variants) expect((await call(s.tsBase, r, h)).status, `fresca ${r.join(' ')}`).toBe(404);
+    s.advance(CONFIRM_MS + 1);
+    for (const r of variants) {
+      const res = await call(s.tsBase, r, h);
+      expect(res.status, `vencida ${r.join(' ')}`).toBe(401);
+      expect(JSON.parse(res.body).code).toBe('reauth');
+    }
+    expect(s.ptyCalls).toEqual([]);
+  });
+
+  it('senha vencida: teclas, tamanho e fechar só nos terminais que esta sessão abriu, assumiu ou ligou com a senha recente', async () => {
+    const s = await start(['permissions', 'terminal', 'pty'], { realPty: true });
+    const { cookie } = await login(s.tsBase, TS);
+    const h = { ...TS, Cookie: cookie };
+    const created = await call(s.tsBase, ['POST', '/api/pty'], h);
+    expect(created.status).toBe(201);
+    expect(JSON.parse(created.body).id).toBe('p1');
+    expect((await call(s.tsBase, ['POST', '/api/agents/a1/takeover'], h)).status).toBe(201);
+    expect((await call(s.tsBase, ['GET', '/api/pty/m1/stream'], h)).status).toBe(200);
+    s.advance(CONFIRM_MS + 1);
+    for (const id of ['p1', 'p2', 'm1']) {
+      for (const act of ['input', 'resize']) expect((await call(s.tsBase, ['POST', `/api/pty/${id}/${act}`], h)).status, `${id} ${act}`).toBe(204);
+    }
+    // m2 foi aberto no Mac e esta sessão nunca o ligou: sem a senha recente, nem digitar, nem fechar.
+    for (const act of ['input', 'resize', 'close']) {
+      const res = await call(s.tsBase, ['POST', `/api/pty/m2/${act}`], h);
+      expect(res.status, `m2 ${act}`).toBe(401);
+      expect(JSON.parse(res.body).code).toBe('reauth');
+    }
+    expect((await call(s.tsBase, ['GET', '/api/pty'], h)).status).toBe(200);
+    expect((await call(s.tsBase, ['POST', '/api/pty/p1/close'], h)).status).toBe(204);
+    expect(s.ptyCalls.filter((c) => c.includes('m2'))).toEqual([]);
+
+    // Outra sessão (login pela LAN, outro token) não herda os terminais desta.
+    const other = { ...TS, Cookie: (await login(s.lanBase)).cookie };
+    s.advance(CONFIRM_MS + 1);
+    expect((await call(s.tsBase, ['POST', '/api/pty/p2/input'], other)).status).toBe(401);
+    // Sair encerra o token e os terminais dele.
+    expect((await request(s.tsBase, '/api/remote/logout', { method: 'POST', body: {}, headers: h })).status).toBe(200);
+    expect((await call(s.tsBase, ['POST', '/api/pty/p2/input'], h)).status).toBe(401);
+  });
+
+  it('origem errada com a senha vencida: 403 (a origem é conferida antes de pedir a senha)', async () => {
+    const s = await start(['permissions', 'terminal', 'pty'], { realPty: true });
+    const { cookie } = await login(s.tsBase, TS);
+    s.advance(CONFIRM_MS + 1);
+    const h = { ...TS, Cookie: cookie };
+    // A 443 (outra origem, liberada no guard) não manda no terminal da 8443.
+    expect((await call(s.tsBase, ['POST', '/api/pty'], { ...h, Origin: 'https://mac.tail.ts.net' })).status).toBe(403);
+    expect((await call(s.tsBase, ['GET', '/api/pty/m1/stream'], { ...h, Origin: 'https://evil.example' })).status).toBe(403);
+    expect((await call(s.tsBase, ['GET', '/api/pty/m1/stream'], { ...h, 'Sec-Fetch-Site': 'cross-site' })).status).toBe(403);
     expect(s.ptyCalls).toEqual([]);
   });
 });

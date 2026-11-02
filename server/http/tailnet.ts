@@ -69,8 +69,21 @@ export function startTailnetListener(
   return server;
 }
 
-/** Abrir, assumir, encerrar e ligar a tela (stream) pedem a senha conferida há pouco; a lista e as teclas, não. */
-export function ptyNeedsConfirm(method: string, path: string): boolean {
-  if (method === 'POST') return path === '/api/pty' || /^\/api\/agents\/[^/]+\/(stop|takeover)$/.test(path);
-  return method === 'GET' && /^\/api\/pty\/[^/]+\/stream$/.test(path);
+const PTY_KEYS_ROUTE = /^\/api\/pty\/([^/]+)\/(input|resize|close)$/;
+
+/**
+ * O que uma sessão remota precisa para uma rota do terminal interativo, falhando fechado: `null` só para a lista
+ * (GET /api/pty); `{ owner }` para teclas, tamanho e fechar (o terminal tem de ser um que esta sessão abriu, assumiu ou
+ * ligou com a senha recente); `'confirm'` (a senha conferida há pouco) para todo o resto, inclusive qualquer variante do
+ * caminho (barra no fim, segmento vazio ou a mais).
+ */
+export function ptyRemoteNeeds(method: string, path: string): null | 'confirm' | { owner: string } {
+  if (method === 'GET' && path === '/api/pty') return null;
+  const keys = method === 'POST' ? PTY_KEYS_ROUTE.exec(path) : null;
+  if (!keys) return 'confirm';
+  try {
+    return { owner: decodeURIComponent(keys[1]) };
+  } catch {
+    return 'confirm';
+  }
 }

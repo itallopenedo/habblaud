@@ -36,7 +36,8 @@ do meio (0.**3**.0).
   `HABBLAUD_REMOTE_ALLOW`, o Habblaud abre uma terceira porta só em `127.0.0.1` (`HABBLAUD_TAILNET_PORT`, padrão
   4749), para o `tailscale serve --https=8443` publicar. Toda requisição nela precisa do usuário do Tailscale certo e
   do mesmo login da porta do celular (mesmas sessões e mesmo freio de senha); abrir, assumir, encerrar e ligar a tela
-  de um terminal pedem a senha de novo se a última conferência passou de 10 min (401 `reauth`). Pela rede local (4748)
+  de um terminal pedem a senha de novo se a última conferência passou de 10 min (401 `reauth`); sem ela, digitar só vale
+  nos terminais que a mesma sessão abriu ou ligou com a senha recente. Pela rede local (4748)
   o terminal interativo continua recusado. Um processo do próprio Mac consegue imitar o cabeçalho do Tailscale, mas
   ainda precisa do login, de `pty` e da senha recente.
 - **Senha de novo no terminal pelo celular.** Pela porta da tailnet, quando o servidor pede a senha (10 min sem

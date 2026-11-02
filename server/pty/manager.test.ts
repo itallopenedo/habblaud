@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { ptyRequestProblem } from '../http/pty';
+import { ptyRequestProblem } from '../http/app';
 import {
   claudeBinFrom,
   findExecutable,

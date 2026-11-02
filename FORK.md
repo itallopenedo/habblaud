@@ -36,8 +36,8 @@ No `.env`: `HABBLAUD_TAILNET_USER=<login do Tailscale>` e `pty` em `HABBLAUD_REM
     tailscale serve --bg --https=8443 http://127.0.0.1:4749     # desligar: tailscale serve --https=8443 off
 
 No iPhone: `https://<mac>.<tailnet>.ts.net:8443` (o mesmo login da 443). Abrir, assumir ou encerrar um terminal pede a
-senha de novo quando a última conferência passou de 10 min. Pela rede local (4748) o terminal interativo continua
-recusado.
+senha de novo quando a última conferência passou de 10 min; sem a senha recente, digitar e fechar só valem nos
+terminais que a mesma sessão abriu ou ligou. Pela rede local (4748) o terminal interativo continua recusado.
 
 O que protege: a 4749 só escuta no `127.0.0.1` (ninguém da rede a alcança); toda requisição precisa do cabeçalho
 `Tailscale-User-Login` igual a `HABBLAUD_TAILNET_USER` (o `tailscale serve` põe o do usuário da tailnet e descarta o

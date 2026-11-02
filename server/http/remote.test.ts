@@ -750,6 +750,27 @@ describe('RemoteSessions — senha conferida há pouco (terminal pelo celular)',
     expect(s.confirmedWithin(a, CONFIRM_MS)).toBe(false);
     expect(s.confirmedWithin(b, CONFIRM_MS)).toBe(true);
   });
+
+  it('terminais da sessão: só registra com a senha recente; é por token; Sair apaga', () => {
+    let now = 1_800_000_000_000;
+    const s = new RemoteSessions(SECRET, CFG, () => now);
+    const a = s.issue().token;
+    now += 1_000;
+    const b = s.issue().token;
+    expect(s.claim(a, 'p1')).toBe(true);
+    expect(s.owns(a, 'p1')).toBe(true);
+    expect(s.owns(a, 'p2')).toBe(false);
+    expect(s.owns(b, 'p1')).toBe(false);
+    expect(s.owns(undefined, 'p1')).toBe(false);
+    expect(s.claim('v1.1800000000000.x', 'p1')).toBe(false);
+    now += CONFIRM_MS;
+    expect(s.claim(a, 'p2')).toBe(false);
+    expect(s.owns(a, 'p2')).toBe(false);
+    expect(s.owns(a, 'p1')).toBe(true);
+    s.revoke(a);
+    expect(s.owns(a, 'p1')).toBe(false);
+    expect(s.confirm(a)).toBe(false);
+  });
 });
 
 describe('/api/remote/confirm (senha de novo)', () => {
