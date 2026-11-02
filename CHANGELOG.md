@@ -36,6 +36,9 @@ do meio (0.**3**.0).
   de um terminal pedem a senha de novo se a última conferência passou de 10 min (401 `reauth`). Pela rede local (4748)
   o terminal interativo continua recusado. Um processo do próprio Mac consegue imitar o cabeçalho do Tailscale, mas
   ainda precisa do login, de `pty` e da senha recente.
+- **Senha de novo no terminal pelo celular.** Pela porta da tailnet, quando o servidor pede a senha (10 min sem
+  conferir), a página abre um diálogo para digitá-la e refaz o pedido sozinha; a tela do terminal só liga depois da
+  senha conferida e avisa na própria tela se o servidor recusar a conexão.
 - **Habblaud como serviço no macOS (`npm run native:install`).** Faz o build e instala um LaunchAgent que mantém o
   Habblaud rodando sem o Docker, com o terminal interativo ligado (`HABBLAUD_PTY=1`), o mesmo `.env` do projeto e logs
   em `~/.habblaud/logs/`. `npm run native:status` mostra o estado e `npm run native:uninstall` tira o serviço (o Docker

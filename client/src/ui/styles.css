@@ -11223,3 +11223,52 @@ html.is-replay #world {
   font-size: 12px;
   color: var(--ui-muted);
 }
+
+/* Senha de novo para o terminal pelo celular (ui/reauth.ts). */
+.ui-reauth-dialog {
+  width: min(360px, calc(100vw - 32px));
+  padding: 0;
+  border: 2px solid var(--ui-line-strong);
+  border-radius: var(--radius);
+  background: #1e2130;
+  color: inherit;
+}
+
+.ui-reauth-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.ui-reauth {
+  display: grid;
+  gap: 10px;
+  padding: 20px;
+}
+
+.ui-reauth__title {
+  margin: 0;
+  font-size: 17px;
+}
+
+.ui-reauth__input {
+  width: 100%;
+  padding: 10px;
+  font: inherit;
+  /* 16px: o iPhone não dá zoom no campo. */
+  font-size: 16px;
+  color: inherit;
+  background: #14161f;
+  border: 2px solid var(--ui-line-strong);
+  border-radius: 6px;
+}
+
+.ui-reauth__err {
+  margin: 0;
+  color: #ff8a80;
+  font-size: 13px;
+}
+
+.ui-reauth__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

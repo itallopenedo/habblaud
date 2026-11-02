@@ -3339,4 +3339,8 @@ export const EN: Readonly<Record<string, string>> = {
   "liberado": "allowed",
   "não liberado (pty em HABBLAUD_REMOTE_ALLOW)": "not allowed (pty in HABBLAUD_REMOTE_ALLOW)",
   "   Porta da tailnet: ligada em 127.0.0.1:{0}, com login e o usuário do Tailscale; terminal interativo: {1}.": "   Tailnet port: on at 127.0.0.1:{0}, with login and the Tailscale user; interactive terminal: {1}.",
+  "Confirme a senha": "Confirm your password",
+  "Para abrir o terminal pelo celular, digite de novo a senha do acesso remoto. Vale por 10 min.": "To open the terminal from your phone, type the remote access password again. It lasts 10 min.",
+  "Terminal interativo só no próprio computador ou pela porta da tailnet": "Interactive terminal only on the computer itself or through the tailnet port",
+  "sem conexão com o terminal": "no connection to the terminal",
 };

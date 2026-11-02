@@ -6,12 +6,14 @@
 // As teclas não vazam para os atalhos do escritório (T, P, M, Esc...): Esc, por exemplo, interrompe o Claude.
 // Fechar a janela não encerra a sessão; "Encerrar" encerra.
 import type { AgentInfo, PtyInfo } from '../../../shared/types';
+import { access, canUsePty } from '../net/access';
 import type { UiComponent, UiContext } from './context';
 import { h, iconButton, setHidden, setText } from './dom';
 import { ICONS } from './icons';
 import { maximizeButton, Movable } from './movable';
 import { closePty, createPty, stopAgent, takeoverAgent } from './ptyapi';
 import type { PtyPane } from './ptypane';
+import { askPassword, confirmedRecently, withReauth } from './reauth';
 import { TermActions } from './termactions';
 import { TermTabs } from './termtabs';
 import { createAccountChip, updateAccountChip } from './widgets';
@@ -99,11 +101,12 @@ export class PtyPanel implements UiComponent, PtyControl {
   }
 
   get enabled(): boolean {
-    return !!this.ctx.store.snapshot?.meta.pty?.enabled && !this.ctx.store.replaying;
+    return !!this.ctx.store.snapshot?.meta.pty?.enabled && !this.ctx.store.replaying && canUsePty();
   }
 
   get reason(): string {
     if (this.ctx.store.replaying) return tr('Sem terminal no timelapse');
+    if (this.ctx.store.snapshot?.meta.pty?.enabled && !canUsePty()) return tr('Terminal interativo só no próprio computador ou pela porta da tailnet');
     return this.ctx.store.snapshot?.meta.pty?.reason ?? tr('Terminal interativo desligado');
   }
 
@@ -140,18 +143,21 @@ export class PtyPanel implements UiComponent, PtyControl {
   }
 
   async takeover(agentId: string): Promise<void> {
-    const p = await takeoverAgent(agentId);
+    const p = await withReauth(() => takeoverAgent(agentId));
     if (p) this.show(p, true);
   }
 
   async newSession(cwd: string, account?: string): Promise<void> {
-    const p = await createPty(cwd, account);
+    const p = await withReauth(() => createPty(cwd, account));
     if (p) this.show(p, true);
   }
 
   async stop(agentId: string): Promise<void> {
-    await stopAgent(agentId);
-    this.ctx.announce(tr('Sessão encerrada.'));
+    const done = await withReauth(async () => {
+      await stopAgent(agentId);
+      return true;
+    });
+    if (done) this.ctx.announce(tr('Sessão encerrada.'));
   }
 
   render(): void {
@@ -215,7 +221,10 @@ export class PtyPanel implements UiComponent, PtyControl {
     if (fresh) this.pendingSelect = p.agentId;
     this.reveal();
     this.render();
-    void this.ensurePane().then((pane) => {
+    void this.ensurePane().then(async (pane) => {
+      if (this.info?.id !== p.id) return;
+      // Pelo celular, ligar a tela pede a senha conferida há pouco (o EventSource não lê o 401): pergunta antes.
+      if (access().remote && !(await confirmedRecently()) && !(await askPassword())) return this.close();
       if (this.info?.id !== p.id) return;
       pane.attach(p.id);
       requestAnimationFrame(() => {
@@ -229,10 +238,22 @@ export class PtyPanel implements UiComponent, PtyControl {
   private ensurePane(): Promise<PtyPane> {
     if (this.pane) return Promise.resolve(this.pane);
     this.loading ??= import('./ptypane').then(({ PtyPane }) => {
-      this.pane = new PtyPane(() => this.ctx.invalidate());
+      this.pane = new PtyPane(
+        () => this.ctx.invalidate(),
+        () => void this.reopen(),
+      );
       this.screen.append(this.pane.el);
       return this.pane;
     });
     return this.loading;
+  }
+
+  /** A tela do terminal foi recusada: pelo celular com a senha vencida, pede a senha e liga de novo; senão, avisa. */
+  private async reopen(): Promise<void> {
+    const id = this.info?.id;
+    const pane = this.pane;
+    if (!id || !pane) return;
+    if (access().remote && !(await confirmedRecently()) && (await askPassword()) && this.info?.id === id) return pane.attach(id);
+    pane.notice(tr('sem conexão com o terminal'));
   }
 }

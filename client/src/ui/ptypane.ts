@@ -22,7 +22,10 @@ export class PtyPane {
   private resizeTimer: ReturnType<typeof setTimeout> | null = null;
   private ro: ResizeObserver;
 
-  constructor(private onExit: () => void) {
+  constructor(
+    private onExit: () => void,
+    private onDenied: () => void,
+  ) {
     this.el = document.createElement('div');
     this.el.className = 'ui-pty__screen';
     this.term = new Terminal({
@@ -72,12 +75,24 @@ export class PtyPane {
       es.close();
       this.onExit();
     });
+    es.onerror = () => {
+      // Recusado (401 da senha vencida, 403, 404): o EventSource desiste sozinho (CLOSED) e não diz o status.
+      if (es.readyState === EventSource.CLOSED && this.es === es && !this.exited) {
+        this.es = null;
+        this.onDenied();
+      }
+    };
   }
 
   detach(): void {
     this.es?.close();
     this.es = null;
     this.id = null;
+  }
+
+  /** Aviso apagado na tela (ex.: sem conexão com o terminal). */
+  notice(text: string): void {
+    this.term.write(`\r\n\x1b[2m[${text}]\x1b[0m\r\n`);
   }
 
   focus(): void {
