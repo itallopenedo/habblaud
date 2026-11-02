@@ -30,9 +30,12 @@ export interface ServiceSpec {
   lang?: string;
 }
 
-/** Idioma do serviço: o LANG de quem instalou, se for algo como pt_BR.UTF-8 (o launchd começa no locale C); senão en_US.UTF-8. */
-export function serviceLang(lang: string | undefined): string {
-  return lang && /^[A-Za-z]{2,3}(_[A-Za-z0-9]+)?\.UTF-8$/.test(lang) ? lang : 'en_US.UTF-8';
+/**
+ * Idioma do serviço: o LANG de quem instalou, se for algo como pt_BR.UTF-8 e o locale existir no sistema (um nome com cara
+ * de locale mas inexistente, como en_BR.UTF-8, devolve o launchd ao locale C); senão en_US.UTF-8.
+ */
+export function serviceLang(lang: string | undefined, exists: (locale: string) => boolean = (l) => existsSync(join('/usr/share/locale', l))): string {
+  return lang && /^[A-Za-z]{2,3}(_[A-Za-z0-9]+)?\.UTF-8$/.test(lang) && exists(lang) ? lang : 'en_US.UTF-8';
 }
 
 /** PATH do serviço: o launchd começa quase vazio; o Node dele e onde ficam claude, codex, whisper-cli e ffmpeg. */
@@ -53,7 +56,7 @@ function xml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-export function renderPlist(spec: ServiceSpec): string {
+export function renderPlist(spec: ServiceSpec, localeExists?: (locale: string) => boolean): string {
   const logs = logFiles(spec.home);
   const args = [spec.node, `--env-file-if-exists=${join(spec.root, '.env')}`, join(spec.root, 'dist', 'server', 'index.js')];
   const env: Array<[string, string]> = [
@@ -61,8 +64,8 @@ export function renderPlist(spec: ServiceSpec): string {
     ['HOME', spec.home],
     ['HABBLAUD_PTY', '1'],
     // O launchd começa no locale C: sem isto o terminal interativo perde acentos e emojis.
-    ['LANG', serviceLang(spec.lang)],
-    ['LC_CTYPE', serviceLang(spec.lang)],
+    ['LANG', serviceLang(spec.lang, localeExists)],
+    ['LC_CTYPE', serviceLang(spec.lang, localeExists)],
   ];
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -104,7 +107,7 @@ export function reloadCommand(domain: string, plist: string, errLog: string, tri
     'i=0',
     `while [ "$i" -lt "$4" ] && launchctl print "$1/${SERVICE_LABEL}" >/dev/null 2>&1; do i=$((i+1)); sleep 0.5; done`,
     'n=0',
-    `until launchctl bootstrap "$1" "$2" >/dev/null 2>>"$3"; do n=$((n+1)); if [ "$n" -ge ${BOOTSTRAP_TRIES} ]; then echo "$(date '+%Y-%m-%dT%H:%M:%S%z') $5" >> "$3"; exit 1; fi; sleep 1; done`,
+    `until launchctl bootstrap "$1" "$2" >/dev/null 2>>"$3"; do n=$((n+1)); if [ "$n" -ge ${BOOTSTRAP_TRIES} ]; then printf '%s %s\\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$5" >> "$3"; exit 1; fi; sleep 1; done`,
   ].join('\n');
   const failed = tr('native:install: não deu para religar o serviço; rode npm run native:install de novo');
   return ['/bin/sh', ['-c', script, 'habblaud-reload', domain, plist, errLog, String(tries), failed]];

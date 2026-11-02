@@ -28,14 +28,17 @@ describe('serviço nativo (LaunchAgent)', () => {
     expect(p).not.toMatch(/PASSWORD|REMOTE_USER|TAILNET/);
   });
 
-  it('idioma do serviço: o LANG de quem instalou quando termina em .UTF-8, senão en_US.UTF-8', () => {
-    expect(serviceLang('pt_BR.UTF-8')).toBe('pt_BR.UTF-8');
-    expect(serviceLang('fr_FR.UTF-8')).toBe('fr_FR.UTF-8');
-    for (const bad of [undefined, '', 'C', 'POSIX', 'pt_BR.ISO8859-1', 'pt_BR.UTF-8; rm -rf /', '<x>.UTF-8']) expect(serviceLang(bad)).toBe('en_US.UTF-8');
-    const p = renderPlist({ ...spec, lang: 'pt_BR.UTF-8' });
+  it('idioma do serviço: o LANG de quem instalou quando termina em .UTF-8 e o locale existe, senão en_US.UTF-8', () => {
+    const exists = (l: string) => ['pt_BR.UTF-8', 'fr_FR.UTF-8', 'en_US.UTF-8'].includes(l);
+    expect(serviceLang('pt_BR.UTF-8', exists)).toBe('pt_BR.UTF-8');
+    expect(serviceLang('fr_FR.UTF-8', exists)).toBe('fr_FR.UTF-8');
+    // en_BR.UTF-8 tem cara de locale mas não existe: o launchd voltaria ao locale C.
+    for (const bad of [undefined, '', 'C', 'POSIX', 'pt_BR.ISO8859-1', 'pt_BR.UTF-8; rm -rf /', '<x>.UTF-8', 'en_BR.UTF-8', '../etc.UTF-8']) expect(serviceLang(bad, exists)).toBe('en_US.UTF-8');
+    const p = renderPlist({ ...spec, lang: 'pt_BR.UTF-8' }, exists);
     expect(p).toContain('<key>LANG</key><string>pt_BR.UTF-8</string>');
     expect(p).toContain('<key>LC_CTYPE</key><string>pt_BR.UTF-8</string>');
-    expect(renderPlist({ ...spec, lang: 'C' })).toContain('<key>LANG</key><string>en_US.UTF-8</string>');
+    expect(renderPlist({ ...spec, lang: 'C' }, exists)).toContain('<key>LANG</key><string>en_US.UTF-8</string>');
+    expect(renderPlist({ ...spec, lang: 'en_BR.UTF-8' }, exists)).toContain('<key>LANG</key><string>en_US.UTF-8</string>');
   });
 
   it('PATH: a pasta do Node primeiro, depois ~/.local/bin (claude, codex) e o Homebrew (whisper-cli, ffmpeg)', () => {
@@ -116,6 +119,13 @@ exit 0
       expect(r.calls.filter((c) => c.startsWith('bootstrap'))).toHaveLength(10);
       const last = r.err.trim().split('\n').pop();
       expect(last).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\S* native:install: não deu para religar o serviço; rode npm run native:install de novo$/);
+    });
+
+    it('a linha de aviso sai inteira mesmo com barras e % no texto (printf, não echo)', () => {
+      const [cmd, args] = reloadCommand('gui/501', '/p/x.plist', '/dev/null');
+      expect(cmd).toBe('/bin/sh');
+      expect(args[1]).toContain("printf '%s %s\\n'");
+      expect(args[1]).not.toMatch(/\becho\b/);
     });
 
     it('o bootstrap que dá certo na última tentativa (a 10ª) ainda vale', () => {
