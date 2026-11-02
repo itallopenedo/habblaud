@@ -3391,4 +3391,6 @@ export const FR: Readonly<Record<string, string>> = {
   "token do Hermes inválido": "jeton Hermes invalide",
   "   Hermes: recebendo eventos pela porta da tailnet ({0}).": "   Hermes : réception des événements par le port du tailnet ({0}).",
   "   Hermes: desligado (defina HABBLAUD_HERMES_TOKEN_HASH).": "   Hermes : désactivé (définissez HABBLAUD_HERMES_TOKEN_HASH).",
+  "O Hermes só é acompanhado aqui: responda no canal dele": "Hermes est seulement suivi ici : répondez dans son canal",
+  "Agente do Hermes (VPS)": "Agent Hermes (VPS)",
 };
