@@ -13,6 +13,7 @@ import { L, symlinkOrSkip, tempDir, writeLines } from '../test/fixtures';
 import { createApiHandler, sendJson, type ApiDeps } from './app';
 import { createRequestGuard, isLoopbackHost } from './guard';
 import {
+  CONFIRM_MS,
   COOKIE,
   createRemoteGate,
   isRemoteRequest,
@@ -70,6 +71,7 @@ describe('parseRemoteConfig', () => {
   });
   it('HABBLAUD_REMOTE_ALLOW: lista, ignora nomes desconhecidos, "none" = só ver', () => {
     expect([...parseAllow('messages, Terminal, bogus')]).toEqual(['messages', 'terminal']);
+    expect([...parseAllow('terminal,pty')]).toEqual(['terminal', 'pty']);
     expect([...parseAllow('none')]).toEqual([]);
     expect([...parseAllow('')]).toEqual(['permissions']);
   });
@@ -717,5 +719,52 @@ describe('cookie Secure e download da CA', () => {
     expect(ca.status).toBe(200);
     expect(ca.headers['content-type']).toBe('application/x-x509-ca-cert');
     expect((await request(base, '/login')).body).toContain('/remote/ca.crt');
+  });
+});
+
+describe('RemoteSessions — senha conferida há pouco (terminal pelo celular)', () => {
+  it('o login conta como conferência; vence em CONFIRM_MS; confirm renova; token inválido ou encerrado não', () => {
+    let now = 1_800_000_000_000;
+    const s = new RemoteSessions(SECRET, CFG, () => now);
+    const { token } = s.issue();
+    expect(s.confirmedWithin(token, CONFIRM_MS)).toBe(true);
+    now += CONFIRM_MS;
+    expect(s.confirmedWithin(token, CONFIRM_MS)).toBe(false);
+    expect(s.confirm(token)).toBe(true);
+    expect(s.confirmedWithin(token, CONFIRM_MS)).toBe(true);
+    expect(s.confirm('v1.1800000000000.x')).toBe(false);
+    expect(s.confirmedWithin(undefined, CONFIRM_MS)).toBe(false);
+    s.revoke(token);
+    expect(s.confirm(token)).toBe(false);
+    expect(s.confirmedWithin(token, CONFIRM_MS)).toBe(false);
+  });
+
+  it('cada token tem a sua conferência (outro aparelho não herda)', () => {
+    let now = 1_800_000_000_000;
+    const s = new RemoteSessions(SECRET, CFG, () => now);
+    const a = s.issue().token;
+    now += 1_000;
+    const b = s.issue().token;
+    now += CONFIRM_MS - 500;
+    expect(s.confirmedWithin(a, CONFIRM_MS)).toBe(false);
+    expect(s.confirmedWithin(b, CONFIRM_MS)).toBe(true);
+  });
+});
+
+describe('/api/remote/confirm (senha de novo)', () => {
+  it('sem login 401; logado: GET diz se está em dia, senha errada 401, certa 200, outro método 405', async () => {
+    const s = await start();
+    expect((await request(s.remoteBase, '/api/remote/confirm')).status).toBe(401);
+    expect((await request(s.remoteBase, '/api/remote/confirm', { method: 'POST', body: { password: PASSWORD } })).status).toBe(401);
+    const cookie = await login(s.remoteBase);
+    const fresh = await request(s.remoteBase, '/api/remote/confirm', { headers: { Cookie: cookie } });
+    expect(fresh.status).toBe(200);
+    expect(JSON.parse(fresh.body)).toEqual({ fresh: true });
+    const wrong = await request(s.remoteBase, '/api/remote/confirm', { method: 'POST', body: { password: 'errada' }, headers: { Cookie: cookie } });
+    expect(wrong.status).toBe(401);
+    expect(JSON.parse(wrong.body).error).toBe('Senha incorreta.');
+    const ok = await request(s.remoteBase, '/api/remote/confirm', { method: 'POST', body: { password: PASSWORD }, headers: { Cookie: cookie } });
+    expect(ok.status).toBe(200);
+    expect((await request(s.remoteBase, '/api/remote/confirm', { method: 'PUT', body: {}, headers: { Cookie: cookie } })).status).toBe(405);
   });
 });

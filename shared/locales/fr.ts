@@ -3342,4 +3342,6 @@ export const FR: Readonly<Record<string, string>> = {
   "Habblaud {0}: Docker {1}, terminal interativo {2}.": "Habblaud {0} : Docker {1}, terminal interactif {2}.",
   "Log: {0}": "Journal : {0}",
   "O serviço nativo (LaunchAgent) só existe no macOS; nos outros sistemas use npm start ou npm run docker:up.": "Le service natif (LaunchAgent) n'existe que sur macOS ; sur les autres systèmes, utilisez npm start ou npm run docker:up.",
+  "Senha incorreta.": "Mot de passe incorrect.",
+  "sessão encerrada: entre de novo": "session terminée : reconnectez-vous",
 };
