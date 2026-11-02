@@ -84,7 +84,18 @@ O arquivo precisa ser só do dono (`chmod 600`): com permissão de grupo ou de o
 nada. `HABBLAUD_OBSERVER_CONFIG` (outro caminho para o JSON) vale para o processo inteiro, ou seja, para todos os perfis
 do gateway: existe só para os testes; em produção cada perfil usa o seu `<HERMES_HOME>/habblaud-observer.json`. O plugin
 junta os eventos por até 1 s (até 50 por requisição), porque o Habblaud tem um freio único de 60 requisições por 10 s
-para todos os perfis, e não usa proxy nem segue redirecionamento.
+para todos os perfis, e não usa proxy nem segue redirecionamento. Esse freio vale para todos os perfis juntos: cada perfil
+manda cerca de 1 requisição por segundo, então muitos perfis ativos ao mesmo tempo podem perder lotes (o Habblaud responde
+"tente de novo" e o escritório se corrige nos eventos seguintes).
+
+Limites e cuidados:
+
+- O token fica legível para o próprio Hermes (ele roda como root e tem a ferramenta terminal, então consegue ler o JSON).
+  Trocar o token: gerar outro, pôr a nova hash no `.env` do Mac (`HABBLAUD_HERMES_TOKEN_HASH`), reiniciar o Habblaud e
+  atualizar o JSON de cada perfil na VPS.
+- O escritório mostra no máximo 50 sessões do Hermes vivas ao mesmo tempo (`HERMES_MAX_SESSIONS`); sessão nova além disso é
+  descartada (com um aviso no log) até alguma sair. Sessões de cron e de subagente saem no fim da primeira conversa.
+- Instalar copiando a pasta do plugin para a VPS, nunca com symlink.
 
 Depois, reiniciar o gateway do jeito que as notas do Hermes mandam (sem turno em andamento). Desligar: tirar a linha
 de `plugins.enabled` (o backup é `config.yaml.bak-habblaud-*`), reiniciar o gateway e apagar a pasta do plugin e o

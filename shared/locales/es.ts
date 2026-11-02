@@ -3365,6 +3365,7 @@ export const ES: Readonly<Record<string, string>> = {
   "Mandando uma mensagem": "Enviando un mensaje",
   "Perguntando ao usuário": "Preguntando al usuario",
   "Eventos do Hermes: falha ao aplicar um evento ({0}).": "Eventos de Hermes: error al aplicar un evento ({0}).",
+  "Eventos do Hermes: muitas sessões vivas, as novas são ignoradas.": "Eventos de Hermes: demasiadas sesiones vivas, las nuevas se ignoran.",
   "Recebeu uma mensagem": "Recibió un mensaje",
   "Agente do Hermes": "Agente de Hermes",
   "eventos do Hermes desligados: HABBLAUD_HERMES_TOKEN_HASH inválido (esperado sha256:<64 hex>)": "eventos de Hermes desactivados: HABBLAUD_HERMES_TOKEN_HASH no válido (se esperaba sha256:<64 hex>)",

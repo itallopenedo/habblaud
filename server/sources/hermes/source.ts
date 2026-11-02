@@ -48,6 +48,10 @@ export const HERMES_ACCOUNT = 'hermes';
 export const HERMES_QUIET_MS = 5 * 60_000;
 /** Sem nenhum evento por este tempo (gateway parado, VPS fora): a sessão sai do escritório. */
 export const HERMES_STALE_MS = 6 * 60 * 60_000;
+/** Teto de sessões vivas: com o token, ninguém enche o escritório de agentes. A sessão nova além dele é descartada. */
+export const HERMES_MAX_SESSIONS = 50;
+/** Plataformas de sessão de uma conversa só (não há "à toa" para voltar): o fim da conversa tira o agente. */
+const ONE_SHOT_PLATFORMS: ReadonlySet<string> = new Set(['cron', 'subagent']);
 
 export function hermesAgentId(session: string): string {
   return `hermes:${session}`;
@@ -77,6 +81,7 @@ interface Session {
   id: string;
   title: string;
   lastAt: number;
+  platform?: string;
   toolCalls: number;
   model?: string;
 }
@@ -153,10 +158,18 @@ export class HermesSource implements AgentSource {
     // Fim de conversa tardio de sessão fechada (ou nunca vista): não cria nem revive o agente.
     if ((ev.event === 'post_llm_call' || ev.event === 'on_session_end') && !this.sessions.has(ev.session)) return;
     const s = this.ensure(ev, id);
+    if (!s) return;
+    // Cron e subagente acabam na primeira conversa: fechar aqui, senão ficam "à toa" como fantasmas até o HERMES_STALE_MS.
+    if ((ev.event === 'post_llm_call' || ev.event === 'on_session_end') && s.platform && ONE_SHOT_PLATFORMS.has(s.platform)) {
+      this.sessions.delete(ev.session);
+      office.closeMain(id);
+      return;
+    }
     switch (ev.event) {
       case 'pre_llm_call':
         office.setStatus(id, 'working');
-        this.activity(id, ev, { kind: 'prompt', icon: '💬', text: tr('Recebeu uma mensagem') });
+        // Início do turno no relógio daqui: não depende do relógio da VPS.
+        this.activity(id, ev, { kind: 'prompt', icon: '💬', text: tr('Recebeu uma mensagem') }, undefined, this.now());
         break;
       case 'pre_tool_call':
         s.toolCalls++;
@@ -192,14 +205,21 @@ export class HermesSource implements AgentSource {
   }
 
   /** A sessão (e o agente) deste evento; cria se for nova ou se o Habblaud reiniciou no meio dela. */
-  private ensure(ev: HermesEvent, id: string): Session {
+  private ensure(ev: HermesEvent, id: string): Session | undefined {
     const title = `Hermes · ${ev.profile}${ev.platform ? ` (${ev.platform})` : ''}`;
     let s = this.sessions.get(ev.session);
     if (!s) {
+      if (this.sessions.size >= HERMES_MAX_SESSIONS) {
+        log.warnOnce('hermes-cap', tr('Eventos do Hermes: muitas sessões vivas, as novas são ignoradas.'));
+        return undefined;
+      }
       s = { id, title, lastAt: this.now(), toolCalls: 0 };
       this.sessions.set(ev.session, s);
     }
-    if (ev.platform) s.title = title;
+    if (ev.platform) {
+      s.title = title;
+      s.platform = ev.platform;
+    }
     if (ev.model) s.model = ev.model;
     s.lastAt = this.now();
     const cur = this.o.office.get(id);
@@ -218,8 +238,8 @@ export class HermesSource implements AgentSource {
     return s;
   }
 
-  private activity(id: string, ev: HermesEvent, d: ActivityDescription, tool?: string): void {
-    const act: Activity = { id: `${id}#h:${++this.seq}`, at: this.at(ev), kind: d.kind, icon: d.icon, text: d.text };
+  private activity(id: string, ev: HermesEvent, d: ActivityDescription, tool?: string, at = this.at(ev)): void {
+    const act: Activity = { id: `${id}#h:${++this.seq}`, at, kind: d.kind, icon: d.icon, text: d.text };
     if (tool) act.tool = tool;
     if (ev.durationMs !== undefined) act.durationMs = ev.durationMs;
     this.o.office.addActivity(id, act, true);

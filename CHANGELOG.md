@@ -50,7 +50,8 @@ do meio (0.**3**.0).
   Hermes só é acompanhado aqui: responda no canal dele"). Os eventos chegam por `POST /api/hermes/events`, só pela porta
   da tailnet, com o usuário do Tailscale e um token (no `.env`, só a hash: `HABBLAUD_HERMES_TOKEN_HASH`); nenhum texto
   de mensagem, argumento ou resultado sai da VPS, e o plugin nunca faz o Hermes esperar. Agentes do Hermes nunca vão ao
-  Habblaud World (a projeção passou a aceitar só Claude Code e Codex).
+  Habblaud World (a projeção passou a aceitar só Claude Code e Codex). Sessões de cron e de subagente saem do escritório no
+  fim da primeira conversa, e no máximo 50 sessões do Hermes ficam vivas ao mesmo tempo.
 - **Barra de teclas no terminal do celular.** Com tela de toque, o terminal interativo ganha uma barra com Esc, Tab,
   Ctrl (um toque arma; a próxima tecla vai com Ctrl, como Ctrl+C) e as setas, logo acima do teclado do iPhone, sem
   fechá-lo a cada toque.

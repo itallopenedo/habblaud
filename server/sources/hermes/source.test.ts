@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { setQuiet } from '../../log';
 import { NameStore } from '../../model/names';
 import { Office } from '../../model/office';
-import { describeHermesTool, HERMES_QUIET_MS, HERMES_STALE_MS, HermesSource, hermesAgentId, type HermesEvent } from './source';
+import { describeHermesTool, HERMES_MAX_SESSIONS, HERMES_QUIET_MS, HERMES_STALE_MS, HermesSource, hermesAgentId, type HermesEvent } from './source';
 
 setQuiet(true);
 
@@ -94,6 +94,38 @@ describe('HermesSource', () => {
     source.apply([ev('post_llm_call'), ev('on_session_end')]);
     expect(office.get(ID)!.status).toBe('offline');
     expect(source.sources()[0].sessions).toBe(0);
+  });
+
+  it('cron e subagente: o fim da conversa fecha o agente (nada de fantasma por 6 h); telegram continua à toa', () => {
+    const { office, source, ev } = setup();
+    source.apply([ev('pre_llm_call', { platform: 'cron' }), ev('on_session_end', { platform: 'cron' })]);
+    expect(office.get(ID)!.status).toBe('offline');
+    expect(source.sources()[0].sessions).toBe(0);
+    const SUB = '1123456789abcdef';
+    source.apply([ev('pre_llm_call', { platform: 'subagent', session: SUB }), ev('post_llm_call', { platform: 'subagent', session: SUB })]);
+    expect(office.get(hermesAgentId(SUB))!.status).toBe('offline');
+    expect(source.sources()[0].sessions).toBe(0);
+    source.apply([ev('pre_llm_call', { session: '2123456789abcdef' }), ev('on_session_end', { session: '2123456789abcdef' })]);
+    expect(office.get(hermesAgentId('2123456789abcdef'))!.status).toBe('idle');
+    expect(source.sources()[0].sessions).toBe(1);
+  });
+
+  it('teto de sessões vivas: a seguinte não cria agente; sessão existente continua recebendo eventos', () => {
+    const { office, source, ev } = setup();
+    const sid = (n: number) => n.toString(16).padStart(16, '0');
+    for (let n = 0; n < HERMES_MAX_SESSIONS; n++) source.apply([ev('pre_llm_call', { session: sid(n) })]);
+    expect(source.sources()[0].sessions).toBe(HERMES_MAX_SESSIONS);
+    source.apply([ev('pre_llm_call', { session: sid(HERMES_MAX_SESSIONS) })]);
+    expect(office.get(hermesAgentId(sid(HERMES_MAX_SESSIONS)))).toBeUndefined();
+    expect(source.sources()[0].sessions).toBe(HERMES_MAX_SESSIONS);
+    source.apply([ev('pre_tool_call', { session: sid(0), tool: 'terminal' })]);
+    expect(office.get(hermesAgentId(sid(0)))!.activity).toMatchObject({ kind: 'run' });
+  });
+
+  it('o início do turno usa o relógio daqui, não o da VPS (atrasado)', () => {
+    const { clock, office, source, ev } = setup();
+    source.apply([ev('pre_llm_call', { at: clock.t - 3_600_000 })]);
+    expect(office.get(ID)!.activity!.at).toBe(clock.t);
   });
 
   it('horário da VPS adiantado não põe atividade no futuro', () => {
