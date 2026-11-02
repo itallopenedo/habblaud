@@ -4,10 +4,13 @@
 // terminal (só a sessão ao vivo). Enter manda, Shift+Enter quebra a linha; a linha de situação acompanha a entrega
 // (GET /api/messages/:id) até ela se resolver. As teclas digitadas aqui não disparam os atalhos globais. O rascunho de
 // cada agente fica guardado (só na memória) ao trocar de agente. O microfone (ui/dictation.ts, Whisper local no Mac)
-// põe o texto ditado no cursor; aparece quando o ditado funciona daqui. A lógica pura está em ui/composer-model.ts.
+// põe o texto ditado no cursor; aparece quando o ditado funciona daqui. O clipe anexa fotos e arquivos (no iPhone:
+// câmera, fotos ou arquivos): sobem um a um em POST /api/attachments e a mensagem leva os ids. A lógica pura está em
+// ui/composer-model.ts.
 import { MESSAGE_MAX } from '../../../shared/messages';
 import type { AgentInfo, OutboxMessage, Provider } from '../../../shared/types';
 import {
+  attachmentsLocked,
   canSend,
   composerMode,
   composerTip,
@@ -17,15 +20,20 @@ import {
   messageText,
   OFFLINE_ERROR,
   POLL_LIMIT_MS,
+  pickAttachments,
   pollDelay,
+  transferFiles,
   sendStatusText,
+  staleAttachmentIds,
   timeoutError,
   type ComposerMode,
   type SendState,
 } from './composer-model';
 import type { UiContext } from './context';
 import { DictationButton, dictationAvailable, insertDictation } from './dictation';
-import { h, setAttr, setHidden, setText, setTitle } from './dom';
+import { h, iconButton, setAttr, setHidden, setText, setTitle } from './dom';
+import { ICONS } from './icons';
+import { fileToBase64 } from './spawn';
 import { access } from '../net/access';
 import { tr } from '../../../shared/i18n';
 
@@ -34,6 +42,15 @@ export type ComposerVariant = 'drawer' | 'terminal';
 export interface ComposerOptions {
   /** Esc dentro da caixa: para onde vai o foco (padrão: só sai da caixa). */
   onEscape?: () => void;
+}
+
+interface PendingFile {
+  file: File;
+  url?: string;
+  el: HTMLElement;
+  remove: HTMLButtonElement;
+  /** Id do anexo já enviado ao servidor: a nova tentativa não o envia de novo. */
+  id?: string;
 }
 
 export class MessageComposer {
@@ -55,6 +72,19 @@ export class MessageComposer {
   private row: HTMLElement;
   private box: HTMLTextAreaElement;
   private sendBtn: HTMLButtonElement;
+  private fileInput: HTMLInputElement;
+  private attachBtn: HTMLButtonElement;
+  private fileList: HTMLElement;
+  /** Recusa do último arquivo escolhido (não mexe na situação do envio: o envio em andamento segue o seu curso). */
+  private fileNote: HTMLElement;
+  /** Anexos por agente (como os rascunhos): sobrevivem a trocar de agente e a ele ficar fora do ar por um instante. */
+  private filesBy = new Map<string, PendingFile[]>();
+  /** Anexos do agente da caixa. */
+  private get files(): PendingFile[] {
+    let list = this.filesBy.get(this.agentId);
+    if (!list) this.filesBy.set(this.agentId, (list = []));
+    return list;
+  }
   private hint: HTMLElement;
   private tip: HTMLElement | null;
   private status: HTMLElement;
@@ -83,6 +113,14 @@ export class MessageComposer {
     });
     this.box.addEventListener('focus', () => this.resize());
     this.box.addEventListener('keydown', (e) => this.onKey(e));
+    // Colar (⌘V no Mac, "Colar" no iPhone) qualquer arquivo vira anexo, como o clipe. O texto que vier junto cola
+    // normalmente; só um colar sem texto deixa de ir para a caixa.
+    this.box.addEventListener('paste', (e) => {
+      const files = transferFiles(e.clipboardData);
+      if (!files.length || this.attachBtn.hidden) return;
+      if (!e.clipboardData?.types.includes('text/plain')) e.preventDefault();
+      this.addFiles(files);
+    });
     this.sendBtn = h(
       'button',
       {
@@ -102,9 +140,17 @@ export class MessageComposer {
     );
     this.dictate.el.classList.add('ui-msg__mic');
     setHidden(this.dictate.el, true);
+    this.fileInput = h('input', { type: 'file', hidden: true, attrs: { multiple: true, 'aria-hidden': 'true', tabindex: '-1' } });
+    this.fileInput.addEventListener('change', () => {
+      this.addFiles([...(this.fileInput.files ?? [])]);
+      this.fileInput.value = '';
+    });
+    this.attachBtn = iconButton(ICONS.attach, tr('Anexar foto ou arquivo'), () => this.fileInput.click(), 'ui-msg__attach');
+    this.fileList = h('ul', { class: 'ui-spawn__files ui-msg__files', attrs: { 'aria-label': tr('Anexos') } });
+    this.fileNote = h('p', { class: 'ui-msg__status is-error', role: 'status', hidden: true, attrs: { 'aria-live': 'polite' } });
     this.row = h('div', { class: `ui-msg__row${term ? ' ui-term__prompt ui-term__prompt--mic' : ''}` });
     if (term) this.row.append(h('span', { class: 'ui-term__caret', text: '>', attrs: { 'aria-hidden': 'true' } }));
-    this.row.append(this.box, this.dictate.el, this.sendBtn);
+    this.row.append(this.box, this.attachBtn, this.dictate.el, this.sendBtn);
     // Clique na "linha do prompt" (fora do botão) põe o cursor na caixa, como num terminal.
     this.row.addEventListener('mousedown', (e) => {
       if (e.target === this.row && !this.box.disabled) {
@@ -115,7 +161,17 @@ export class MessageComposer {
     this.hint = h('p', { class: 'ui-msg__hint', hidden: true });
     this.status = h('p', { class: 'ui-msg__status', role: 'status', hidden: true, attrs: { 'aria-live': 'polite' } });
     this.tip = term ? null : h('p', { class: 'ui-msg__tip', text: composerTip() });
-    this.el = h('div', { class: `ui-msg ui-msg--${variant}` }, this.hint, this.row, this.dictStatus, this.status, this.tip);
+    this.el = h('div', { class: `ui-msg ui-msg--${variant}` }, this.hint, this.row, this.fileList, this.fileNote, this.fileInput, this.dictStatus, this.status, this.tip);
+    // Arrastar arquivos do Finder para a caixa também anexa.
+    this.el.addEventListener('dragover', (e) => {
+      if (!this.attachBtn.hidden && e.dataTransfer?.types.includes('Files')) e.preventDefault();
+    });
+    this.el.addEventListener('drop', (e) => {
+      const files = transferFiles(e.dataTransfer);
+      if (!files.length || this.attachBtn.hidden) return;
+      e.preventDefault();
+      this.addFiles(files);
+    });
   }
 
   /**
@@ -140,6 +196,8 @@ export class MessageComposer {
       // Gravando para outro agente: para sem transcrever (a fala era para aquele).
       this.dictate.cancel();
       this.shown = shown;
+      // Os anexos seguem o agente, não o "pronto": só trocar de agente muda a lista (e quem saiu de vez perde os seus).
+      if (key !== this.agentId) this.showFiles(key);
       this.agentId = key;
       this.box.value = ready ? (this.drafts.get(key) ?? '') : '';
       this.box.style.height = '';
@@ -153,6 +211,7 @@ export class MessageComposer {
     setTitle(this.box, ready ? '' : mode.text);
     this.row.classList.toggle('is-disabled', !ready);
     setHidden(this.sendBtn, !ready);
+    setHidden(this.attachBtn, !ready || store.mock);
     // Consulta em cache (30 s): o Mac pode instalar o Whisper ou parar o auxiliar com a página aberta.
     void dictationAvailable().then((ok) => {
       if (ok === this.canDictate) return;
@@ -232,7 +291,59 @@ export class MessageComposer {
   }
 
   private syncButton(): void {
-    this.sendBtn.disabled = this.mode.kind !== 'ready' || !canSend(this.box.value) || this.states.get(this.agentId)?.phase === 'sending';
+    const sending = this.states.get(this.agentId)?.phase === 'sending';
+    this.sendBtn.disabled = this.mode.kind !== 'ready' || !canSend(this.box.value, this.files.length) || sending;
+    // Enviando, os anexos ficam como estão (o envio já os levou).
+    this.attachBtn.disabled = attachmentsLocked(this.states.get(this.agentId)?.phase);
+    for (const f of this.files) f.remove.disabled = this.attachBtn.disabled;
+  }
+
+  private addFiles(list: File[]): void {
+    if (attachmentsLocked(this.states.get(this.agentId)?.phase)) return;
+    const { accepted, problem } = pickAttachments(list, this.files.length);
+    this.sayFile(problem);
+    for (const i of accepted) {
+      const file = list[i]!;
+      const url = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
+      const el = h('li', { class: 'ui-spawn__file' });
+      const thumb = url
+        ? h('img', { class: 'ui-spawn__thumb', attrs: { src: url, alt: '' } })
+        : h('span', { class: 'ui-spawn__thumb ui-spawn__thumb--doc', attrs: { 'aria-hidden': 'true' }, text: (file.name.split('.').pop() ?? '').slice(0, 4).toUpperCase() || tr('ARQ') });
+      const remove = iconButton(ICONS.close, tr('Tirar {0}', [file.name]), () => {
+        if (!attachmentsLocked(this.states.get(this.agentId)?.phase)) this.removeFile(item);
+      }, 'ui-icon-btn--sm ui-spawn__file-x');
+      const item: PendingFile = { file, url, el, remove };
+      el.append(thumb, h('span', { class: 'ui-spawn__file-name', text: file.name, attrs: { title: file.name } }), remove);
+      this.files.push(item);
+      this.fileList.append(el);
+    }
+    this.syncButton();
+  }
+
+  private sayFile(text = ''): void {
+    setText(this.fileNote, text);
+    setHidden(this.fileNote, !text);
+  }
+
+  /** Tira um anexo de `key` (o agente da caixa, ou o que enviou: a caixa pode ter mudado de agente no meio do envio). */
+  private removeFile(item: PendingFile, key = this.agentId): void {
+    if (item.url) URL.revokeObjectURL(item.url);
+    item.el.remove();
+    this.filesBy.set(key, (this.filesBy.get(key) ?? []).filter((f) => f !== item));
+    this.sayFile();
+    this.syncButton();
+  }
+
+  /** A caixa passa a `key`: mostra os anexos dele e descarta os de agentes que já não estão no escritório. */
+  private showFiles(key: string): void {
+    const live = new Set((this.ctx.store.snapshot?.agents ?? []).map((a) => a.id));
+    for (const [k, list] of [...this.filesBy]) {
+      if (k === key || live.has(k)) continue;
+      for (const f of list) if (f.url) URL.revokeObjectURL(f.url);
+      this.filesBy.delete(k);
+    }
+    this.fileList.replaceChildren(...(this.filesBy.get(key) ?? []).map((f) => f.el));
+    this.sayFile();
   }
 
   /** Cresce com o texto até o limite do CSS (~6 linhas; depois rola). Escondida, mede quando aparecer. */
@@ -252,12 +363,24 @@ export class MessageComposer {
   private async send(choice?: { questionId: string; option: number }): Promise<void> {
     const agentId = this.agentId;
     const raw = this.box.value;
-    if (this.mode.kind !== 'ready' || (!choice && !canSend(raw)) || this.states.get(agentId)?.phase === 'sending') return;
+    if (this.mode.kind !== 'ready' || (!choice && !canSend(raw, this.files.length)) || this.states.get(agentId)?.phase === 'sending') return;
     this.providers.set(agentId, this.provider);
     this.setState(agentId, { phase: 'sending', at: Date.now() });
-    let r: { message: OutboxMessage } | { error: string };
+    const files = choice ? [] : [...this.files];
+    let r: { message: OutboxMessage } | { error: string; status?: number } | undefined;
     try {
-      r = await this.ctx.store.sendMessage(agentId, choice ? '' : messageText(raw), choice);
+      for (const f of files) {
+        if (f.id) continue; // já subiu numa tentativa anterior
+        const up = await this.ctx.store.uploadAttachment(f.file.name, f.file.type, await fileToBase64(f.file));
+        if ('error' in up) {
+          r = up;
+          break;
+        }
+        f.id = up.id;
+      }
+      r ??= await this.ctx.store.sendMessage(agentId, choice ? '' : messageText(raw), choice, files.map((f) => f.id!));
+      // O servidor não aceitou os anexos (venceram ou ele não os conhece): a próxima tentativa envia tudo de novo.
+      if ('error' in r && staleAttachmentIds(r.status)) for (const f of files) f.id = undefined;
     } catch {
       r = { error: OFFLINE_ERROR };
     }
@@ -274,6 +397,7 @@ export class MessageComposer {
         this.resize();
       }
     }
+    for (const f of files) this.removeFile(f, agentId);
     const m = r.message;
     this.setState(agentId, { phase: m.status, id: m.id, error: m.error, at: Date.now() });
     if (!isSettled(m.status)) this.poll(agentId, m.id, Date.now());

@@ -1,14 +1,16 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AccountsService } from '../accounts/service';
 import { setQuiet } from '../log';
 import { NameStore } from '../model/names';
 import { Office } from '../model/office';
-import { tempDir } from '../test/fixtures';
-import { createApiHandler, sendJson } from './app';
+import { AgentFiles } from '../deliveries/agent-files';
+import { FileFetcher } from '../deliveries/fetcher';
+import { L, symlinkOrSkip, tempDir, writeLines } from '../test/fixtures';
+import { createApiHandler, sendJson, type ApiDeps } from './app';
 import { createRequestGuard, isLoopbackHost } from './guard';
 import {
   COOKIE,
@@ -26,6 +28,7 @@ import {
 import { Hub } from './sse';
 import { hashPassword, parsePasswordHash } from '../remote/password';
 import { SpawnService } from '../spawn/spawn';
+import { AttachmentStore } from '../spawn/attachments';
 
 setQuiet(true);
 
@@ -176,7 +179,7 @@ afterEach(async () => {
 });
 
 /** Uma porta local (sem login) e uma remota (com login), sobre a MESMA API, como no server/index.ts. */
-async function start(allow: RemoteFeature[] = ['permissions']): Promise<Harness> {
+async function start(allow: RemoteFeature[] = ['permissions'], extra: Partial<ApiDeps> = {}): Promise<Harness> {
   const tmp = tempDir();
   const dir = join(tmp.dir, '.claude');
   mkdirSync(join(dir, 'sessions'), { recursive: true });
@@ -230,6 +233,7 @@ async function start(allow: RemoteFeature[] = ['permissions']): Promise<Harness>
       worldCalls.push(`${req.method} ${url.pathname}`);
       sendJson(res, 200, { ok: true });
     },
+    ...extra,
   });
   const guard = createRequestGuard();
   const gate = createRemoteGate({ config: CFG, sessions: new RemoteSessions(SECRET, CFG), secure: false });
@@ -305,6 +309,27 @@ async function login(base: string): Promise<string> {
 }
 
 describe('porta remota', () => {
+  it('anexo de mensagem (POST /api/attachments): com messages liberado; spawn sozinho não basta; o do Novo agente segue com spawn', async () => {
+    const file = { name: 'foto.jpg', type: 'image/jpeg', data: Buffer.from('jpeg').toString('base64') };
+    const msg = await start(['permissions', 'messages'], { attachments: new AttachmentStore() });
+    const c1 = await login(msg.remoteBase);
+    const ok = await request(msg.remoteBase, '/api/attachments', { method: 'POST', body: file, headers: { Cookie: c1 } });
+    expect(ok.status).toBe(201);
+    expect(JSON.parse(ok.body)).toMatchObject({ id: expect.any(String), name: 'foto.jpg', size: 4 });
+    expect((await request(msg.remoteBase, '/api/spawn/attachments', { method: 'POST', body: file, headers: { Cookie: c1 } })).status).toBe(403);
+
+    const sp = await start(['permissions', 'spawn'], { attachments: new AttachmentStore() });
+    const c2 = await login(sp.remoteBase);
+    expect((await request(sp.remoteBase, '/api/attachments', { method: 'POST', body: file, headers: { Cookie: c2 } })).status).toBe(403);
+    expect((await request(sp.remoteBase, '/api/spawn/attachments', { method: 'POST', body: file, headers: { Cookie: c2 } })).status).toBe(201);
+    // Porta local com Host local: vale como antes.
+    expect((await request(sp.localBase, '/api/attachments', { method: 'POST', body: file })).status).toBe(201);
+    expect((await request(sp.localBase, '/api/attachments')).status).toBe(405);
+    const off = await start(['permissions', 'messages']);
+    const c3 = await login(off.remoteBase);
+    expect((await request(off.remoteBase, '/api/attachments', { method: 'POST', body: file, headers: { Cookie: c3 } })).status).toBe(403);
+  });
+
   it('logado: terminal interativo, rotas do hook e do plugin e o auxiliar nunca passam, nem com Host local', async () => {
     const s = await start(['permissions', 'messages', 'terminal', 'spawn']);
     const cookie = await login(s.remoteBase);
@@ -321,6 +346,7 @@ describe('porta remota', () => {
       ['POST', '/api/codex/bridge/poll'],
       ['POST', '/api/codex/events'],
       ['POST', '/api/host/files/poll'],
+      ['POST', '/api/host/attachments/poll'],
       ['POST', '/api/host/spawn/poll'],
     ];
     for (const [method, path] of blocked) {
@@ -519,6 +545,72 @@ describe('porta remota', () => {
     const h = await start();
     const r = await request(h.remoteBase, '/api/remote/login', { method: 'POST', headers: { Origin: 'http://evil.example' }, body: CREDS });
     expect(r.status).toBe(403);
+  });
+
+  it('aba Arquivos: o arquivo aberto é sempre a versão atual (nada de cache) e a checagem real recusa o que é protegido', async (ctx) => {
+    const tmp = tempDir();
+    try {
+      mkdirSync(join(tmp.dir, 'docs'));
+      mkdirSync(join(tmp.dir, '.ssh'));
+      const doc = join(tmp.dir, 'docs', 'relatorio.md');
+      writeFileSync(doc, 'versao 1');
+      writeFileSync(join(tmp.dir, '.ssh', 'notas.md'), 'segredo');
+      symlinkOrSkip(ctx.skip, join(tmp.dir, '.ssh', 'notas.md'), join(tmp.dir, 'docs', 'atalho.md'));
+      const transcript = join(tmp.dir, 't.jsonl');
+      writeLines(transcript, [
+        L.assistant([L.tool('w1', 'Write', { file_path: doc, content: 'x' })]),
+        L.assistant([L.tool('w2', 'Write', { file_path: join(tmp.dir, 'docs', 'atalho.md'), content: 'x' })]),
+      ]);
+      const s = await start(['terminal'], {
+        agentFiles: new AgentFiles({ transcriptPathOf: () => transcript, cwdOf: () => tmp.dir }),
+        files: new FileFetcher({ direct: true }),
+      });
+      const cookie = await login(s.remoteBase);
+      const headers = { Cookie: cookie };
+      const { files } = JSON.parse((await request(s.remoteBase, '/api/agents/a1/files', { headers })).body);
+      const idOf = (name: string) => files.find((f: { name: string }) => f.name === name).id;
+      const first = await request(s.remoteBase, `/api/agents/a1/files/${idOf('relatorio.md')}`, { headers });
+      expect([first.status, first.body]).toEqual([200, 'versao 1']);
+      expect(first.headers['cache-control']).toBe('no-store');
+      expect(first.headers['cross-origin-resource-policy']).toBe('same-origin');
+      writeFileSync(doc, 'versao 2, maior');
+      const second = await request(s.remoteBase, `/api/agents/a1/files/${idOf('relatorio.md')}`, { headers });
+      expect([second.status, second.body]).toEqual([200, 'versao 2, maior']);
+      // O atalho parece um .md comum no caminho, mas aponta para dentro de .ssh: a checagem real, na hora de abrir, recusa.
+      const link = await request(s.remoteBase, `/api/agents/a1/files/${idOf('atalho.md')}`, { headers });
+      expect(link.status).toBe(403);
+      expect(link.body).not.toContain('segredo');
+      rmSync(doc);
+      expect((await request(s.remoteBase, `/api/agents/a1/files/${idOf('relatorio.md')}`, { headers })).status).toBe(404);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it('aba Arquivos: só com terminal liberado; lista e abre pelo id, nunca pelo caminho', async () => {
+    const tmp = tempDir();
+    try {
+      const transcript = join(tmp.dir, 't.jsonl');
+      writeLines(transcript, [L.assistant([L.tool('w1', 'Write', { file_path: '/p/loja/relatorio.md', content: '# oi' })])]);
+      const extra = {
+        agentFiles: new AgentFiles({ transcriptPathOf: (id) => (id === 'a1' ? transcript : undefined), cwdOf: () => '/p/loja' }),
+        files: new FileFetcher({ direct: true, check: (p: string) => ({ path: p, size: 4 }), read: () => Buffer.from('# oi') }),
+      };
+      const no = await start(['permissions'], extra);
+      const c1 = await login(no.remoteBase);
+      expect((await request(no.remoteBase, '/api/agents/a1/files', { headers: { Cookie: c1 } })).status).toBe(403);
+      const yes = await start(['terminal'], extra);
+      const c2 = await login(yes.remoteBase);
+      const listed = JSON.parse((await request(yes.remoteBase, '/api/agents/a1/files', { headers: { Cookie: c2 } })).body);
+      expect(listed.files).toEqual([expect.objectContaining({ name: 'relatorio.md', path: 'relatorio.md', kind: 'text' })]);
+      const opened = await request(yes.remoteBase, `/api/agents/a1/files/${listed.files[0].id}`, { headers: { Cookie: c2 } });
+      expect(opened.status).toBe(200);
+      expect(opened.body).toBe('# oi');
+      expect((await request(yes.remoteBase, '/api/agents/a1/files/nao-existe', { headers: { Cookie: c2 } })).status).toBe(404);
+      expect((await request(yes.remoteBase, '/api/agents/a9/files', { headers: { Cookie: c2 } })).status).toBe(404);
+    } finally {
+      tmp.cleanup();
+    }
   });
 });
 

@@ -311,16 +311,32 @@ export class OfficeStore {
    * (agente que não recebe mensagens, fila cheia, acesso que não é local...). Sem conexão com o servidor: lança.
    * No ?mock=1 a entrega é fictícia (o simulador põe a atividade no agente).
    */
-  async sendMessage(agentId: string, text: string, choice?: { questionId: string; option: number }): Promise<{ message: OutboxMessage } | { error: string }> {
+  async sendMessage(agentId: string, text: string, choice?: { questionId: string; option: number }, attachments?: string[]): Promise<{ message: OutboxMessage } | { error: string; status?: number }> {
     if (this.mock) return this.mockSend(agentId, text);
-    const res = await fetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(choice ? { agentId, ...choice } : { agentId, text }) });
+    const body = choice ? { agentId, ...choice } : { agentId, text, ...(attachments?.length ? { attachments } : {}) };
+    const res = await fetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch {
+      // Resposta sem JSON (ex.: guard): usa a mensagem padrão.
+    }
+    if (res.status === 201 && data && typeof data === 'object') return { message: data as OutboxMessage };
+    const error = (data as { error?: unknown } | undefined)?.error;
+    return { error: typeof error === 'string' ? error : tr('erro {0}', [res.status]), status: res.status };
+  }
+
+  /** Manda um anexo da mensagem (POST /api/attachments, base64 em JSON): o id para o sendMessage ou o erro. Sem conexão: lança. */
+  async uploadAttachment(name: string, type: string, data: string): Promise<{ id: string } | { error: string }> {
+    const res = await fetch('/api/attachments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, type, data }) });
     let body: unknown;
     try {
       body = await res.json();
     } catch {
       // Resposta sem JSON (ex.: guard): usa a mensagem padrão.
     }
-    if (res.status === 201 && body && typeof body === 'object') return { message: body as OutboxMessage };
+    const id = (body as { id?: unknown } | undefined)?.id;
+    if (res.status === 201 && typeof id === 'string') return { id };
     const error = (body as { error?: unknown } | undefined)?.error;
     return { error: typeof error === 'string' ? error : tr('erro {0}', [res.status]) };
   }

@@ -407,3 +407,65 @@ describe('terminal — segurança, limites e duplicatas', () => {
     expect(ms).toBeLessThan(3_000);
   });
 });
+
+describe('terminal — imagens (referências, sem base64 na entrada)', () => {
+  const png = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
+  const jpg = { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: '/9j/4AAQ' } };
+
+  it('prompt com imagens: referências na entrada e o conteúdo só no drainImages', () => {
+    const p = createTerminalParser();
+    const line = userBlocks([{ type: 'text', text: 'olha isso' }, png, jpg]);
+    const uuid = JSON.parse(line).uuid as string;
+    const [e] = p.push(line);
+    expect(e).toMatchObject({
+      kind: 'user',
+      text: 'olha isso\n[imagem] [imagem]',
+      images: [
+        { id: `${uuid}:i0`, mime: 'image/png' },
+        { id: `${uuid}:i1`, mime: 'image/jpeg' },
+      ],
+    });
+    expect(JSON.stringify(e)).not.toContain('iVBORw0KGgo');
+    expect(p.drainImages!()).toEqual([
+      { id: `${uuid}:i0`, mime: 'image/png', data: 'iVBORw0KGgo=' },
+      { id: `${uuid}:i1`, mime: 'image/jpeg', data: '/9j/4AAQ' },
+    ]);
+    expect(p.drainImages!()).toEqual([]);
+  });
+
+  it('imagem num tool_result: referência no resultado, id pelo tool_use_id', () => {
+    const p = createTerminalParser();
+    const [r] = p.push(userBlocks([{ type: 'tool_result', tool_use_id: 'shot1', content: [{ type: 'text', text: 'Tela capturada' }, png] }]));
+    expect(r).toMatchObject({ kind: 'result', toolUseId: 'shot1', text: 'Tela capturada\n[imagem]', images: [{ id: 'shot1:i0', mime: 'image/png' }] });
+    expect(p.drainImages!().map((i) => i.id)).toEqual(['shot1:i0']);
+  });
+
+  it('prompt na fila (queued_command) também leva a referência', () => {
+    const p = createTerminalParser();
+    const line = queued([{ type: 'text', text: 'olha a tela' }, png], { commandMode: 'prompt' });
+    const uuid = JSON.parse(line).uuid as string;
+    const [e] = p.push(line);
+    expect(e).toMatchObject({ kind: 'user', text: 'olha a tela\n[imagem]', images: [{ id: `${uuid}:i0`, mime: 'image/png' }] });
+  });
+
+  it('tipo desconhecido, sem media_type ou sem base64: só o marcador "[imagem]", sem referência', () => {
+    const p = createTerminalParser();
+    const bad = [
+      { type: 'image', source: { type: 'base64', media_type: 'image/svg+xml', data: 'PHN2Zz4=' } },
+      { type: 'image', source: { type: 'base64', data: 'AA' } },
+      { type: 'image', source: { type: 'url', url: 'https://exemplo.invalid/y.png' } },
+    ];
+    const [e] = p.push(userBlocks([{ type: 'text', text: 'várias' }, ...bad]));
+    expect(e).toMatchObject({ kind: 'user', text: 'várias\n[imagem] [imagem] [imagem]' });
+    expect(e).not.toHaveProperty('images');
+    expect(p.drainImages!()).toEqual([]);
+  });
+
+  it('no máximo 10 imagens por entrada; o que espera o drainImages tem teto', () => {
+    const p = createTerminalParser();
+    const [e] = p.push(userBlocks(Array.from({ length: 12 }, () => png)));
+    expect((e as Extract<TerminalEntry, { kind: 'user' }>).images).toHaveLength(10);
+    for (let i = 0; i < 5; i++) p.push(userBlocks(Array.from({ length: 10 }, () => png)));
+    expect(p.drainImages!().length).toBeLessThanOrEqual(32);
+  });
+});

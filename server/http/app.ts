@@ -17,10 +17,13 @@ import type { TerminalStreams } from './terminal';
 import { tr } from '../../shared/i18n';
 import type { SpawnService } from '../spawn/spawn';
 import { ATTACHMENT_BODY_MAX, parseAttachment, type AttachmentStore } from '../spawn/attachments';
+import type { HostFileWriter } from '../spawn/host-writer';
 import type { SpawnFolder } from '../spawn/folders';
 import { AUDIO_BODY_MAX, type DictationService } from '../dictation/dictation';
 import type { DeliveryIndex } from '../deliveries/deliveries';
+import type { AgentFiles } from '../deliveries/agent-files';
 import type { FileFetcher } from '../deliveries/fetcher';
+import { fileType } from '../deliveries/files';
 import { HOST_WAIT_MS } from '../host-wait';
 
 export interface ApiDeps {
@@ -67,14 +70,18 @@ export interface ApiDeps {
   spawn?: SpawnService;
   /** Pastas sugeridas no "Novo agente" (GET /api/spawn/folders; spawn/folders.ts): projetos recentes. */
   spawnFolders?: () => Promise<SpawnFolder[]>;
-  /** Anexos do "Novo agente" (POST /api/spawn/attachments; spawn/attachments.ts). */
+  /** Anexos do "Novo agente" (POST /api/spawn/attachments) e das mensagens (POST /api/attachments); spawn/attachments.ts. */
   attachments?: AttachmentStore;
+  /** Anexos das mensagens no Docker: o auxiliar do host grava (/api/host/attachments/*; spawn/host-writer.ts). */
+  attachmentWriter?: HostFileWriter;
   /** Ditado (/api/dictation e, para o auxiliar do host, /api/host/dictation/*; dictation/dictation.ts). */
   dictation?: DictationService;
   /** Entregas (GET /api/deliveries e os anexos em /api/deliveries/file/:id; deliveries/deliveries.ts). */
   deliveries?: DeliveryIndex;
   /** Quem lê os arquivos das entregas (e, para o auxiliar do host, /api/host/files/*; deliveries/fetcher.ts). */
   files?: FileFetcher;
+  /** Seção Arquivos da gaveta (GET /api/agents/:id/files[/:fileId]; deliveries/agent-files.ts). */
+  agentFiles?: AgentFiles;
   /** Renomeia a sala (POST /api/rooms/rename {id, name}; vazio volta ao padrão). Devolve o nome em uso, ou undefined se a sala não existe. */
   renameRoom?: (id: string, name: string) => string | undefined;
   /** Estatísticas do "Meu dia" (GET /api/stats, http/stats.ts). */
@@ -98,8 +105,13 @@ export interface ApiDeps {
 
 /** GET /api/agents/:id/terminal (ids nunca contêm '/'). */
 const TERMINAL_ROUTE = /^\/api\/agents\/([^/]+)\/terminal$/;
+/** GET /api/terminal/image/:stream/:id: imagem de uma entrada do terminal (http/terminal.ts, TerminalImages). */
+const TERMINAL_IMAGE_ROUTE = /^\/api\/terminal\/image\/([^/]+)\/([^/]+)$/;
 /** POST /api/agents/:id/stop|takeover (terminal interativo). */
 const AGENT_ACTION_ROUTE = /^\/api\/agents\/[^/]+\/(stop|takeover)$/;
+
+/** GET /api/agents/:id/files e /api/agents/:id/files/:fileId (seção Arquivos da gaveta). */
+const AGENT_FILES_ROUTE = /^\/api\/agents\/([^/]+)\/files(?:\/([^/]+))?$/;
 
 /** PUT|DELETE /api/agents/:id/character: personagem do projeto (ver Office.setCharacter). */
 const CHARACTER_ROUTE = /^\/api\/agents\/([^/]+)\/character$/;
@@ -168,14 +180,16 @@ export function sendJson(res: ServerResponse, status: number, body: unknown): vo
  * Anexo de entrega. Páginas e SVG vêm numa sandbox sem scripts (CSP), para não rodarem com o login do escritório;
  * PDF e imagens podem abrir dentro do modal (mesma origem).
  */
-function sendFile(res: ServerResponse, data: Buffer, type: string, name: string): void {
+function sendFile(res: ServerResponse, data: Buffer, type: string, name: string, cache = 'private, max-age=300'): void {
   const active = /^text\/html|^image\/svg/.test(type);
   res.writeHead(200, {
     'Content-Type': type,
     'Content-Length': data.length,
-    'Cache-Control': 'private, max-age=300',
+    'Cache-Control': cache,
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'SAMEORIGIN',
+    // Só a própria página embute ou lê estes arquivos (imagens do terminal, arquivos do agente, entregas).
+    'Cross-Origin-Resource-Policy': 'same-origin',
     'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(name)}`,
     ...(active ? { 'Content-Security-Policy': "sandbox; default-src 'none'; img-src data: blob: 'self'; style-src 'unsafe-inline'; media-src 'self'" } : {}),
   });
@@ -327,6 +341,18 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
     else sendJson(res, 500, { error: tr('erro interno') });
   };
 
+  /** POST de um anexo ({name, type?, data base64}) no depósito: 201 {id, name, size}. */
+  const putAttachment = (req: IncomingMessage, res: ServerResponse, store: AttachmentStore) =>
+    readJson(req, ATTACHMENT_BODY_MAX)
+      .then((body) => {
+        const a = parseAttachment(body);
+        if ('error' in a) return sendJson(res, 400, { error: a.error });
+        const r = store.put(a);
+        if ('error' in r) return sendJson(res, 429, { error: r.error });
+        sendJson(res, 201, { id: r.id, name: a.name, size: a.data.length });
+      })
+      .catch((err) => fail(res, err));
+
   return (req, res, url) => {
     const path = url.pathname;
     if (path !== '/api' && !path.startsWith('/api/')) return false;
@@ -432,6 +458,28 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       }
       return true;
     }
+    const imageMatch = TERMINAL_IMAGE_ROUTE.exec(path);
+    if (imageMatch) {
+      // Imagens da conversa: a mesma trava do terminal.
+      if (!isRead) methodNotAllowed(res, 'GET');
+      else if (!terminals) sendJson(res, 403, { error: tr('terminal desligado: ele só funciona com o Habblaud acessível apenas pelo próprio computador') });
+      else if (!trusted(req, 'terminal')) sendJson(res, 403, { error: denied(req, tr('o terminal só abre pelo próprio computador (http://localhost ou http://127.0.0.1)')) });
+      else {
+        let stream: string;
+        let id: string;
+        try {
+          stream = decodeURIComponent(imageMatch[1]);
+          id = decodeURIComponent(imageMatch[2]);
+        } catch {
+          sendJson(res, 400, { error: tr('id inválido') });
+          return true;
+        }
+        const img = terminals.images.get(stream, id);
+        if (!img) sendJson(res, 404, { error: tr('imagem indisponível: abra o terminal de novo') });
+        else sendFile(res, img.data, img.mime, `imagem.${img.mime.slice('image/'.length).replace('jpeg', 'jpg')}`);
+      }
+      return true;
+    }
     if (path.startsWith('/api/sessions/')) {
       handleSessionsRoute(req, res, path, {
         history: deps.terminal ? deps.sessions : undefined,
@@ -502,16 +550,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         const store = deps.attachments;
         if (method !== 'POST') methodNotAllowed(res, 'POST');
         else if (!store) sendJson(res, 403, { error: tr('anexos desligados') });
-        else
-          readJson(req, ATTACHMENT_BODY_MAX)
-            .then((body) => {
-              const a = parseAttachment(body);
-              if ('error' in a) return sendJson(res, 400, { error: a.error });
-              const r = store.put(a);
-              if ('error' in r) return sendJson(res, 429, { error: r.error });
-              sendJson(res, 201, { id: r.id, name: a.name, size: a.data.length });
-            })
-            .catch((err) => fail(res, err));
+        else putAttachment(req, res, store);
       }
       else if (path === '/api/spawn' && method === 'POST') {
         readJson(req)
@@ -526,6 +565,15 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         if (info) sendJson(res, 200, info);
         else sendJson(res, 404, { error: tr('pedido desconhecido') });
       } else methodNotAllowed(res, path === '/api/spawn' ? 'GET, POST' : 'GET');
+      return true;
+    }
+    if (path === '/api/attachments') {
+      // Foto ou arquivo de uma mensagem: vai para a sessão junto com o texto, então a trava das mensagens.
+      const store = deps.attachments;
+      if (method !== 'POST') methodNotAllowed(res, 'POST');
+      else if (!deps.messages || !store) sendJson(res, 403, { error: tr('anexos desligados') });
+      else if (!trusted(req, 'messages')) sendJson(res, 403, { error: denied(req, tr('mensagens só são mandadas pelo próprio computador (http://localhost ou http://127.0.0.1)')) });
+      else putAttachment(req, res, store);
       return true;
     }
     if (path === '/api/dictation' || path.startsWith('/api/dictation/')) {
@@ -570,6 +618,26 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
             (err) => fail(res, err),
           );
       } else sendJson(res, 404, { error: tr('rota desconhecida') });
+      return true;
+    }
+    if (path === '/api/host/attachments/poll' || path === '/api/host/attachments/ack') {
+      // Só o auxiliar do host, pela porta local (nunca pela remota); fora do Docker, só pelo loopback.
+      const writer = deps.attachmentWriter;
+      if (method !== 'POST') methodNotAllowed(res, 'POST');
+      else if (!writer) sendJson(res, 403, { error: tr('anexos desligados') });
+      else if (!trusted(req) || (!deps.inDocker && !isLoopbackAddress(req.socket.remoteAddress))) {
+        sendJson(res, 403, { error: denied(req, tr('só o auxiliar do próprio computador')) });
+      } else if (path === '/api/host/attachments/poll') {
+        req.resume();
+        hostWait(res, url, (ms, signal) => writer.pollWait(ms, signal)).then((list) => list && sendJson(res, 200, { writes: list }), (err) => fail(res, err));
+      } else {
+        readJson(req, 512 * 1024)
+          .then((body) => {
+            writer.ack(body);
+            sendJson(res, 200, { ok: true });
+          })
+          .catch((err) => fail(res, err));
+      }
       return true;
     }
     if (path === '/api/host/files/poll' || path === '/api/host/files/ack') {
@@ -645,6 +713,43 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       }
       return true;
     }
+    const filesMatch = AGENT_FILES_ROUTE.exec(path);
+    if (filesMatch) {
+      // Arquivos que o agente escreveu: mostram o trabalho dele, a mesma trava do terminal (e das entregas).
+      const list = deps.agentFiles;
+      const files = deps.files;
+      if (!isRead) methodNotAllowed(res, 'GET');
+      else if (!list || !files) sendJson(res, 403, { error: tr('arquivos desligados') });
+      else if (!trusted(req, 'terminal')) sendJson(res, 403, { error: denied(req, tr('os arquivos só abrem pelo próprio computador (http://localhost)')) });
+      else {
+        let id: string;
+        let fileId: string | undefined;
+        try {
+          id = decodeURIComponent(filesMatch[1]);
+          fileId = filesMatch[2] === undefined ? undefined : decodeURIComponent(filesMatch[2]);
+        } catch {
+          sendJson(res, 400, { error: tr('id inválido') });
+          return true;
+        }
+        if (fileId === undefined) {
+          const out = list.list(id);
+          if (out) sendJson(res, 200, { files: out });
+          else sendJson(res, 404, { error: tr('agente não encontrado') });
+        } else {
+          const p = list.path(id, fileId);
+          const type = p ? fileType(p) : undefined;
+          if (!p || !type) sendJson(res, 404, { error: tr('arquivo desconhecido: atualize a lista') });
+          else
+            // O agente reescreve estes arquivos: sempre a versão atual do disco (sem cache aqui nem no navegador).
+            files.get(p, { fresh: true }).then(
+              (r) => ('data' in r ? sendFile(res, r.data, type.type, p.split('/').pop() || 'arquivo', 'no-store') : sendJson(res, r.status, { error: r.error })),
+              (err) => fail(res, err),
+            );
+        }
+      }
+      return true;
+    }
+
     if (path.startsWith('/api/agents/')) {
       if (!isRead) {
         methodNotAllowed(res, 'GET');

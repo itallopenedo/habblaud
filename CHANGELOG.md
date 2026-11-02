@@ -26,6 +26,15 @@ do meio (0.**3**.0).
 
 ### Adicionado
 
+- **Foto ou arquivo na mensagem.** A caixa de mensagem (na gaveta e no terminal) ganhou o clipe: no iPhone, câmera,
+  fotos ou arquivos. Também dá para colar (⌘V no Mac, "Colar" no iPhone) ou arrastar qualquer arquivo para a caixa:
+  foto, vídeo, PDF, áudio. Os arquivos vão para `~/.habblaud/attachments` no Mac (no Docker, gravados pelo
+  `npm run codex:bridge`) e a mensagem leva os caminhos, para o Claude Code e para o Codex. Até 8 anexos de 15 MB por
+  mensagem; vale a trava das mensagens (`messages` no acesso pelo celular).
+- **Imagens na conversa do terminal.** Prints e fotos da conversa (coladas no prompt ou no resultado de uma
+  ferramenta, como uma captura de tela) aparecem como miniaturas no terminal; um toque abre a imagem grande. A imagem
+  só é buscada quando aparece (`GET /api/terminal/image`), com a mesma trava do terminal; o terminal do Codex continua
+  com "[imagem]".
 - **Uso do Fable no cartão da conta:** tokens de hoje e dos últimos 7 dias (entrada + saída), com o detalhe por tipo
   no tooltip.
 - **`npm run upstream:sync` (fork):** traz a versão nova do upstream para o `meu-habblaud` num worktree temporário,
@@ -33,6 +42,9 @@ do meio (0.**3**.0).
 - **Avisos de travado e de erro no iPhone:** o `scripts/phone-notify.mjs` também avisa quando um agente fica trabalhando
   sem novidade por mais de 15 min (`HABBLAUD_STUCK_MIN`; não conta comandos do Claude Code ainda rodando em segundo
   plano nem agentes esperando um subagente) e quando para com erro. Texto genérico, como o aviso de espera.
+- **Arquivos do agente na gaveta.** A seção "Arquivos" lista as imagens, PDFs, vídeos, páginas e textos que o agente
+  escreveu ou editou na sessão, do mais recente para o mais antigo, e abre cada um com um toque. Mesmos tipos e
+  bloqueios das entregas (nada de `.env`, chaves ou pastas de credenciais) e a mesma trava do terminal.
 
 ## [1.0.4] - 2026-10-27
 

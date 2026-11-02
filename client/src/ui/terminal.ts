@@ -8,7 +8,7 @@
 // O modelo (deduplicação, junção ferramenta -> resultado, limite de entradas, prévias recolhidas e rodapé) é puro e
 // testado em ui/terminal.test.ts; a montagem usa só textContent (o markdown das respostas vem de ui/markdown.ts).
 // Sessão do Codex: selo "Codex" no cabeçalho e um spinner neutro no rodapé (o ✻ é do Claude Code).
-import type { AgentInfo, Provider, RecentSession, TerminalEntry, TerminalInit } from '../../../shared/types';
+import type { AgentInfo, Provider, RecentSession, TerminalEntry, TerminalImage, TerminalInit } from '../../../shared/types';
 import { MessageComposer } from './composer';
 import type { UiComponent, UiContext } from './context';
 import { copyText, h, iconButton, prefersReducedMotion, setAttr, setHidden, setText, setTitle, setVariant } from './dom';
@@ -98,6 +98,19 @@ export function toolKey(toolUseId: string): string {
 
 export function terminalUrl(agentId: string): string {
   return `/api/agents/${encodeURIComponent(agentId)}/terminal`;
+}
+
+/** Imagem de uma entrada (GET /api/terminal/image/:stream/:id; `stream` = o agentId do `init`). */
+export function terminalImageUrl(stream: string, id: string): string {
+  return `/api/terminal/image/${encodeURIComponent(stream)}/${encodeURIComponent(id)}`;
+}
+
+/** Referências de imagem válidas de uma entrada (até 10; o resto é ignorado). */
+export function entryImages(e: { images?: unknown }): TerminalImage[] {
+  if (!Array.isArray(e.images)) return [];
+  return e.images
+    .filter((i): i is TerminalImage => !!i && typeof i.id === 'string' && typeof i.mime === 'string' && i.mime.startsWith('image/'))
+    .slice(0, 10);
 }
 
 /** Stream da conversa de uma sessão do histórico (mesmo protocolo do terminal do agente). */
@@ -484,13 +497,35 @@ function row(kind: string, at: number, now: number, ...children: (Node | null)[]
   return h('div', { class: `ui-term__row ui-term__row--${kind}`, title: entryTimeTitle(at, now) }, ...children);
 }
 
+/** Miniaturas das imagens de uma entrada (null = nenhuma). */
+type Pics = (images: readonly TerminalImage[]) => HTMLElement | null;
+
+/** Miniaturas que abrem a imagem grande num toque; imagem que não carrega volta a ser "[imagem]". */
+function imageStrip(stream: string, images: readonly TerminalImage[], open: (src: string) => void, onLoad: () => void): HTMLElement | null {
+  if (!stream || !images.length) return null;
+  const strip = h('div', { class: 'ui-term__pics', attrs: { 'data-chrome': '' } });
+  images.forEach((img, i) => {
+    const src = terminalImageUrl(stream, img.id);
+    const thumb = h('img', { class: 'ui-term__pic', attrs: { src, alt: tr('Imagem {0}', [i + 1]), loading: 'lazy', decoding: 'async' } });
+    const btn = h('button', { class: 'ui-term__pic-btn', type: 'button', attrs: { 'aria-label': tr('Ampliar a imagem {0}', [i + 1]) }, on: { click: () => open(src) } }, thumb);
+    // A miniatura não tem tamanho reservado: ao carregar, quem segue o fim da conversa volta ao fim.
+    thumb.addEventListener('load', onLoad, { once: true });
+    // Fora do cache (404) ou erro: troca o botão inteiro pelo texto, sem ícone de imagem quebrada.
+    thumb.addEventListener('error', () => btn.replaceWith(h('span', { class: 'ui-term__empty', text: tr('[imagem]') })), { once: true });
+    strip.append(btn);
+  });
+  return strip;
+}
+
 /** "  ⎿  resultado" (primeiras linhas, "… +N linhas", o aviso de corte e o botão de copiar). */
-function resultBlock(r: ResultEntry, copy: Copier): HTMLElement {
+function resultBlock(r: ResultEntry, copy: Copier, pics: Pics): HTMLElement {
   const out = h('div', { class: 'ui-term__out' });
   const text = r.text.replace(/\s+$/, '');
   if (text) out.append(collapsible(text, RESULT_PREVIEW_LINES, 'ui-term__res-text'));
   else out.append(h('span', { class: 'ui-term__empty', text: r.error ? tr('(erro sem mensagem)') : tr('(sem saída)'), attrs: { 'data-chrome': '' } }));
   if (r.truncated) out.append(h('span', { class: 'ui-term__cut', text: tr('(resultado cortado)'), attrs: { 'data-chrome': '' } }));
+  const strip = pics(entryImages(r));
+  if (strip) out.append(strip);
   const el = h('div', { class: `ui-term__result${r.error ? ' is-error' : ''}` }, h('span', { class: 'ui-term__elbow', text: '⎿', attrs: { 'aria-hidden': 'true' } }), out);
   if (text) el.append(copy(copyTextOf(r), tr('resultado')));
   return el;
@@ -527,17 +562,17 @@ function toolRow(t: ToolEntry, now: number, copy: Copier): ToolRefs {
   return { row: el, slot };
 }
 
-function attachResult(refs: ToolRefs, r: ResultEntry, copy: Copier): void {
+function attachResult(refs: ToolRefs, r: ResultEntry, copy: Copier, pics: Pics): void {
   refs.row.classList.remove('is-pending');
   refs.row.classList.toggle('is-error', !!r.error);
   refs.row.classList.toggle('is-ok', !r.error);
-  refs.slot.replaceChildren(resultBlock(r, copy));
+  refs.slot.replaceChildren(resultBlock(r, copy, pics));
 }
 
-function entryRow(e: PlainEntry, now: number, copy: Copier): HTMLElement {
+function entryRow(e: PlainEntry, now: number, copy: Copier, pics: Pics): HTMLElement {
   switch (e.kind) {
     case 'user': {
-      const el = row('user', e.at, now, mark('>'), h('div', { class: 'ui-term__col' }, collapsible(e.text, PROMPT_PREVIEW_LINES, 'ui-term__user-text')));
+      const el = row('user', e.at, now, mark('>'), h('div', { class: 'ui-term__col' }, collapsible(e.text, PROMPT_PREVIEW_LINES, 'ui-term__user-text'), pics(entryImages(e))));
       el.append(copy(copyTextOf(e), 'prompt'));
       return el;
     }
@@ -588,6 +623,17 @@ interface SearchRef {
 const NO_FINALS: ReadonlySet<string> = new Set();
 
 export class TerminalPanel implements UiComponent, TerminalControl {
+  /** O agentId do último `init` (id do agente ou "session:<conta>:<sessionId>"): base dos endereços das imagens. */
+  private stream = '';
+  private readonly imageView: HTMLDialogElement;
+  private readonly imageImg: HTMLImageElement;
+  private pics: Pics = (images) =>
+    imageStrip(
+      this.stream,
+      images,
+      (src) => this.showImage(src),
+      () => this.follow && this.scrollToEnd(),
+    );
   readonly el: HTMLElement;
   private id: string | null = null;
   /** Sessão do histórico aberta no painel (null = terminal de um agente). */
@@ -748,6 +794,21 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     // Esc na caixa devolve o foco à conversa (o próximo fecha o terminal).
     this.composer = new MessageComposer(ctx, 'terminal', { onEscape: () => this.focusLog() });
 
+    this.imageImg = h('img', { class: 'ui-deliv-viewer__img', attrs: { alt: tr('Imagem da conversa') } });
+    this.imageView = h(
+      'dialog',
+      { class: 'ui-deliv-viewer ui-term__viewer', attrs: { 'aria-label': tr('Imagem da conversa') } },
+      h('div', { class: 'ui-deliv-viewer__bar' }, h('div', { class: 'ui-deliv-viewer__label' }), iconButton(ICONS.close, tr('Fechar'), () => this.imageView.close(), 'ui-icon-btn--sm')),
+      h('div', { class: 'ui-deliv-viewer__body' }, this.imageImg),
+    ) as HTMLDialogElement;
+    this.imageView.addEventListener('click', (e) => {
+      // O visualizador ocupa a tela toda (sem fundo para tocar): qualquer toque fora da barra fecha.
+      if (!(e.target as Element).closest('.ui-deliv-viewer__bar')) this.imageView.close();
+    });
+    // Esc fecha só a imagem (o atalho do terminal não vê a tecla).
+    this.imageView.addEventListener('keydown', (e) => e.stopPropagation());
+    this.imageView.addEventListener('close', () => this.imageImg.removeAttribute('src'));
+
     this.el = h(
       'section',
       { class: 'ui-term', role: 'dialog', hidden: true, tabIndex: -1, attrs: { 'aria-label': tr('Terminal') } },
@@ -756,6 +817,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
       tools,
       h('div', { class: 'ui-term__body' }, this.alertEl, this.scroll, this.newBtn),
       h('div', { class: 'ui-term__foot' }, this.status, this.composer.el),
+      this.imageView,
     );
     this.el.addEventListener('keydown', (e) => this.onKey(e));
     // Arrastar pela barra solta a janela (ui/movable.ts).
@@ -788,6 +850,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.disconnect();
     this.stopSpinner();
     this.closeSearch(false);
+    if (this.imageView.open) this.imageView.close();
     const hadFocus = this.el.contains(document.activeElement) || document.activeElement === document.body;
     this.id = null;
     this.session = null;
@@ -964,7 +1027,13 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.source = null;
   }
 
+  private showImage(src: string): void {
+    this.imageImg.src = src;
+    if (!this.imageView.open) this.imageView.showModal();
+  }
+
   private onInit(data: TerminalInit): void {
+    this.stream = data.agentId;
     // Reconexão com o usuário lendo lá em cima: tenta manter a mesma entrada no mesmo lugar.
     const anchor = this.follow ? null : this.captureAnchor();
     this.clear();
@@ -1005,7 +1074,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     for (const { toolKey: key, result } of batch.attached) {
       const refs = this.tools.get(key);
       if (!refs) continue;
-      attachResult(refs, result, this.copier);
+      attachResult(refs, result, this.copier, this.pics);
       touched.push(key);
     }
     const gone = new Set(evicted);
@@ -1033,15 +1102,15 @@ export class TerminalPanel implements UiComponent, TerminalControl {
   }
 
   private buildRow(item: TerminalItem, now: number): HTMLElement {
-    if (item.type === 'entry') return entryRow(item.entry, now, this.copier);
+    if (item.type === 'entry') return entryRow(item.entry, now, this.copier, this.pics);
     if (item.type === 'orphan') {
-      const el = row('orphan', item.result.at, now, mark(''), h('div', { class: 'ui-term__col' }, resultBlock(item.result, this.copier)));
+      const el = row('orphan', item.result.at, now, mark(''), h('div', { class: 'ui-term__col' }, resultBlock(item.result, this.copier, this.pics)));
       if (!el.title) el.title = tr('Resultado de uma ferramenta anterior');
       return el;
     }
     const refs = toolRow(item.tool, now, this.copier);
     this.tools.set(item.key, refs);
-    if (item.result) attachResult(refs, item.result, this.copier);
+    if (item.result) attachResult(refs, item.result, this.copier, this.pics);
     return refs.row;
   }
 

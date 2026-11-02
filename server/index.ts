@@ -43,12 +43,14 @@ import { getLocale, tr } from '../shared/i18n';
 import type { WorldLocale } from '../shared/world/protocol';
 import { createCliRunner, createOpener, SpawnService } from './spawn/spawn';
 import { runnableClaudeBin } from './claude-bin';
-import { AttachmentStore } from './spawn/attachments';
+import { AttachmentStore, attachmentsRoot, writeMessageAttachments } from './spawn/attachments';
+import { HostFileWriter } from './spawn/host-writer';
 import { recentFolders } from './spawn/folders';
 import { isDemoId } from '../shared/timeline';
 import { DictationService } from './dictation/dictation';
 import { createWhisperTranscriber, findWhisper } from './dictation/whisper';
 import { DeliveryIndex } from './deliveries/deliveries';
+import { AgentFiles } from './deliveries/agent-files';
 import { FileFetcher } from './deliveries/fetcher';
 import { WorldClient } from './world/client';
 import { createWorldRoutes } from './world/http';
@@ -224,6 +226,16 @@ const deliveryFiles = deliveries
       },
     })
   : undefined;
+// Seção Arquivos da gaveta: o que o agente escreveu, aberto pelo mesmo leitor das entregas (mesma trava).
+const agentFiles = deliveryFiles
+  ? new AgentFiles({
+      transcriptPathOf: (id) => agents.transcriptPathOf(id),
+      cwdOf: (id) => {
+        const a = office.get(id);
+        return a ? office.roomPath(a.roomId) : undefined;
+      },
+    })
+  : undefined;
 // Linha do tempo do timelapse: grava cada snapshot novo (com throttle) em <dataDir>/timeline.
 const timelineDir = join(config.dataDir, TIMELINE_DIR);
 const timeline = config.timeline ? new TimelineRecorder({ dir: timelineDir }) : undefined;
@@ -255,7 +267,8 @@ const ptyOptIn = isTruthy(ptyFlag);
 // Novo agente pelo escritório (sessão do Claude Code em segundo plano, ou a tela do app do Claude preenchida): a
 // liberação acima mais a trava das mensagens. No Docker, quem roda é o auxiliar do host (npm run codex:bridge).
 const spawnOn = config.messages && ptyOptIn;
-const attachments = spawnOn ? new AttachmentStore() : undefined;
+// Anexos: das mensagens (trava das mensagens) e do Novo agente; um depósito só.
+const attachments = config.messages ? new AttachmentStore() : undefined;
 const spawnBin = config.inDocker ? undefined : runnableClaudeBin(process.env);
 const spawn = spawnOn
   ? new SpawnService(config.inDocker ? { attachments } : { opener: createOpener(), cli: spawnBin ? createCliRunner(spawnBin) : undefined, attachments })
@@ -265,6 +278,8 @@ const whisper = config.messages && !config.inDocker ? findWhisper() : undefined;
 const dictation = config.messages
   ? new DictationService(whisper && !('missing' in whisper) ? { transcriber: createWhisperTranscriber(whisper) } : {})
   : undefined;
+// Anexos das mensagens no Docker: quem grava no Mac é o auxiliar do host (npm run codex:bridge).
+const attachmentWriter = config.messages && config.inDocker ? new HostFileWriter() : undefined;
 const messages = config.messages
   ? new MessageRegistry({
       office,
@@ -275,6 +290,9 @@ const messages = config.messages
         run: codexBin ? createCodexQueueRunner(codexBin) : undefined,
         homeOf: (account) => accounts.entriesOf('codex').find((e) => e.id === account)?.detected.configDir,
       },
+      attachments,
+      // Modo Node: o próprio servidor grava em ~/.habblaud/attachments; no Docker, o auxiliar do host.
+      writeFiles: attachmentWriter ? (_id, files) => attachmentWriter.write(files) : async (_id, files) => writeMessageAttachments(attachmentsRoot(), files),
     })
   : undefined;
 late.messages = messages;
@@ -362,9 +380,11 @@ const api = createApiHandler({
   pty: ptys ? createPtyRoutes(ptys) : undefined,
   spawn,
   attachments,
+  attachmentWriter,
   dictation,
   deliveries,
   files: deliveryFiles,
+  agentFiles,
   spawnFolders: async () => {
     const snap = hub.current();
     const last = new Map<string, number>();

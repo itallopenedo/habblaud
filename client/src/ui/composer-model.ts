@@ -50,9 +50,63 @@ export function messageText(raw: string): string {
   return raw.replace(/\s+$/, '');
 }
 
-export function canSend(raw: string): boolean {
+export function canSend(raw: string, files = 0): boolean {
   const text = messageText(raw);
-  return text.trim().length > 0 && text.length <= MESSAGE_MAX;
+  return (text.trim().length > 0 || files > 0) && text.length <= MESSAGE_MAX;
+}
+
+/** Os mesmos limites do servidor (server/spawn/attachments.ts). */
+export const MESSAGE_FILES_MAX = 8;
+export const MESSAGE_FILE_BYTES = 15 * 1024 * 1024;
+
+/** Por que o arquivo não entra na mensagem (undefined = entra); `count` = quantos já estão anexados. */
+export function attachmentProblem(f: { name: string; size: number }, count: number): string | undefined {
+  if (count >= MESSAGE_FILES_MAX) return tr('No máximo {0} anexos por mensagem.', [MESSAGE_FILES_MAX]);
+  if (!f.size) return tr('{0} está vazio.', [f.name]);
+  if (f.size > MESSAGE_FILE_BYTES) return tr('{0} passa de {1} MB.', [f.name, MESSAGE_FILE_BYTES / 1024 / 1024]);
+  return undefined;
+}
+
+/** Quais arquivos de uma seleção entram (índices) e o primeiro motivo de recusa; passou do limite, o resto não entra. */
+/**
+ * Arquivos de um colar ou de um arrastar (foto, vídeo, PDF, áudio, qualquer tipo): `files` quando o navegador o
+ * preenche; senão os itens do tipo arquivo (o Safari do iPhone às vezes só entrega `items`). Texto não vira anexo.
+ */
+export function transferFiles(
+  data: { files?: ArrayLike<File> | null; items?: ArrayLike<{ kind: string; getAsFile(): File | null }> | null } | null,
+): File[] {
+  if (!data) return [];
+  const files = Array.from(data.files ?? []);
+  if (files.length) return files;
+  return Array.from(data.items ?? []).flatMap((i) => {
+    const f = i.kind === 'file' ? i.getAsFile() : null;
+    return f ? [f] : [];
+  });
+}
+
+export function pickAttachments(list: { name: string; size: number }[], count: number): { accepted: number[]; problem: string | undefined } {
+  const accepted: number[] = [];
+  let problem: string | undefined;
+  for (const [i, f] of list.entries()) {
+    const p = attachmentProblem(f, count + accepted.length);
+    if (!p) {
+      accepted.push(i);
+      continue;
+    }
+    problem ??= p;
+    if (count + accepted.length >= MESSAGE_FILES_MAX) break;
+  }
+  return { accepted, problem };
+}
+
+/** Com o envio em andamento (subindo os anexos ou esperando o POST) não se anexa nem se tira arquivo. */
+export function attachmentsLocked(phase: SendPhase | undefined): boolean {
+  return phase === 'sending';
+}
+
+/** O servidor recusou a mensagem por causa dos anexos (400: vencido ou desconhecido): os ids guardados não valem mais. */
+export function staleAttachmentIds(status: number | undefined): boolean {
+  return status === 400;
 }
 
 /** Enter manda; Shift+Enter (e Alt+Enter) quebram a linha; Enter compondo um acento (IME) não conta. */

@@ -12,14 +12,21 @@
 // - comandos de barra locais e a saída deles vêm em linhas system `local_command`;
 // - erros da API: uma linha system `api_error` por tentativa e, quando o Claude Code desiste, uma
 //   mensagem sintética do assistant com `isApiErrorMessage`.
-import type { TerminalEntry, TerminalInputKind } from '../../shared/types';
+import type { TerminalEntry, TerminalImage, TerminalInputKind } from '../../shared/types';
 import { formatDuration, maskSecrets, truncate } from '../../shared/activity';
 import { forkDirective, parseTaskNotification } from './transcript';
 import { tr } from '../../shared/i18n';
 
+/** Imagem lida do transcript, esperando o terminal guardá-la (http/terminal.ts, TerminalImages): base64 como veio. */
+export interface TerminalImageData extends TerminalImage {
+  data: string;
+}
+
 export interface TerminalParser {
   /** Interpreta uma linha do JSONL. Linhas inválidas ou irrelevantes devolvem []. */
   push(line: string): TerminalEntry[];
+  /** Imagens das entradas devolvidas desde a última chamada (só o parser do Claude Code tem). */
+  drainImages?(): TerminalImageData[];
 }
 
 // ------------------------------------------------------------------ limites (caracteres)
@@ -44,12 +51,20 @@ const SYSTEM_TEXT_MAX = 200;
  * caracteres são descartados.
  */
 const TAIL_GUARD = 256;
+/** Imagens que viram referência (as mesmas das capturas das entregas). */
+export const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp)$/;
+export const IMAGES_PER_ENTRY = 10;
+/** Imagens esperando o drainImages (as mais antigas saem). */
+const IMAGES_PENDING = 32;
+/** Base64 de uma imagem (≈ 10 MB decodificados); maior que isto fica só o marcador "[imagem]". */
+const IMAGE_B64_MAX = 14_000_000;
 /** Ids já emitidos que são lembrados (duplicatas são locais: a mesma linha ou mensagem repetida). */
 const SEEN_MAX = 20_000;
 const MSG_BLOCKS_MAX = 64;
 
 type Rec = Record<string, unknown>;
 type Level = 'info' | 'warn' | 'error';
+type UserEntry = Extract<TerminalEntry, { kind: 'user' }>;
 type ToolEntry = Extract<TerminalEntry, { kind: 'tool' }>;
 type ResultEntry = Extract<TerminalEntry, { kind: 'result' }>;
 type ThinkingEntry = Extract<TerminalEntry, { kind: 'thinking' }>;
@@ -375,6 +390,21 @@ function resultText(content: unknown): string {
   return parts.join('\n');
 }
 
+/** Imagens base64 de tipo conhecido entre os blocos, em ordem (até IMAGES_PER_ENTRY). */
+function imageBlocks(blocks: readonly unknown[]): Array<{ mime: string; data: string }> {
+  const out: Array<{ mime: string; data: string }> = [];
+  for (const raw of blocks) {
+    const src = rec(rec(raw)?.source);
+    if (rec(raw)?.type !== 'image' || src?.type !== 'base64') continue;
+    const mime = typeof src.media_type === 'string' ? src.media_type : '';
+    const data = typeof src.data === 'string' ? src.data : '';
+    if (!IMAGE_TYPES.test(mime) || !data || data.length > IMAGE_B64_MAX) continue;
+    out.push({ mime, data });
+    if (out.length >= IMAGES_PER_ENTRY) break;
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------ parser
 
 const INTERRUPTED = /^\[Request interrupted by user/;
@@ -453,11 +483,32 @@ class Parser implements TerminalParser {
     }
   }
 
+  private pendingImages: TerminalImageData[] = [];
+
+  drainImages(): TerminalImageData[] {
+    const out = this.pendingImages;
+    this.pendingImages = [];
+    return out;
+  }
+
+  /** Guarda as imagens para o drainImages e devolve as referências (ids `<base>:i<n>`); undefined sem imagens. */
+  private keepImages(base: string, imgs: Array<{ mime: string; data: string }>): TerminalImage[] | undefined {
+    if (!imgs.length) return undefined;
+    const refs = imgs.map((img, i) => ({ id: `${base}:i${i}`, mime: img.mime }));
+    imgs.forEach((img, i) => this.pendingImages.push({ ...refs[i], data: img.data }));
+    if (this.pendingImages.length > IMAGES_PENDING) this.pendingImages.splice(0, this.pendingImages.length - IMAGES_PENDING);
+    return refs;
+  }
+
   // ---------------------------------------------------------------- entradas
 
-  private userEntry(c: Ctx, raw: string): void {
+  private userEntry(c: Ctx, raw: string, pics: readonly unknown[] = []): void {
     const text = marked(prepare(raw, TEXT_MAX));
-    if (text) this.emit({ kind: 'user', id: `${c.uuid}:u`, at: c.at, text });
+    if (!text) return;
+    const e: UserEntry = { kind: 'user', id: `${c.uuid}:u`, at: c.at, text };
+    const images = this.keepImages(c.uuid, imageBlocks(pics));
+    if (images) e.images = images;
+    this.emit(e);
   }
 
   /** `text` deve vir numa linha só (oneLine) ou ser fixo; a máscara aqui é a última garantia. */
@@ -492,7 +543,7 @@ class Parser implements TerminalParser {
     if (typeof content === 'string') return this.userText(c, content);
     if (!Array.isArray(content)) return;
     const texts: string[] = [];
-    let images = 0;
+    const pics: unknown[] = [];
     let results = 0;
     let forkResult = false;
     for (const raw of content) {
@@ -503,7 +554,7 @@ class Parser implements TerminalParser {
         if (this.fork === 'expect-result' && str(b.tool_use_id) === this.inheritedSpawn) forkResult = true;
         else this.toolResult(c, b);
       } else if (b.type === 'text' && typeof b.text === 'string') texts.push(b.text);
-      else if (b.type === 'image') images++;
+      else if (b.type === 'image') pics.push(b);
     }
     if (forkResult) {
       // Resultado da chamada herdada ("Fork started…"): a instrução do fork vem no texto. É o prompt dele.
@@ -513,14 +564,14 @@ class Parser implements TerminalParser {
       return;
     }
     // Imagem ao lado de um tool_result pertence ao resultado; sozinha (ou com texto), é do prompt.
-    if (texts.length || (images && !results)) this.userText(c, texts.join('\n'), results ? 0 : images);
+    if (texts.length || (pics.length && !results)) this.userText(c, texts.join('\n'), results ? [] : pics);
   }
 
-  private userText(c: Ctx, raw: string, images = 0): void {
+  private userText(c: Ctx, raw: string, pics: readonly unknown[] = []): void {
     const text = (raw.includes('<system-reminder>') ? raw.replace(REMINDER, '') : raw).trim();
-    const pics = images ? Array.from({ length: Math.min(images, 10) }, () => tr('[imagem]')).join(' ') : '';
+    const marks = pics.length ? Array.from({ length: Math.min(pics.length, 10) }, () => tr('[imagem]')).join(' ') : '';
     if (!text) {
-      if (pics) this.userEntry(c, pics);
+      if (marks) this.userEntry(c, marks, pics);
       return;
     }
     if (text.startsWith('<task-notification>')) return this.notification(c, text);
@@ -586,7 +637,7 @@ class Parser implements TerminalParser {
         break;
     }
     // Imagens coladas já aparecem no texto como "[Image #1]"; sem essa marca, o marcador vai no fim.
-    this.userEntry(c, pics && !/\[Image\b/.test(text) ? `${text}\n${pics}` : text);
+    this.userEntry(c, marks && !/\[Image\b/.test(text) ? `${text}\n${marks}` : text, pics);
   }
 
   private notification(c: Ctx, text: string): void {
@@ -624,6 +675,8 @@ class Parser implements TerminalParser {
     const e: ResultEntry = { kind: 'result', id: `${id}:r`, at: c.at, toolUseId: id, text: p.text || tr('(sem saída)') };
     if (error) e.error = true;
     if (p.truncated) e.truncated = true;
+    const images = Array.isArray(b.content) ? this.keepImages(id, imageBlocks(b.content)) : undefined;
+    if (images) e.images = images;
     this.emit(e);
   }
 
@@ -750,20 +803,20 @@ class Parser implements TerminalParser {
     // Só os comandos enfileirados interessam; os de outros agentes (peer/coordinator) são meta.
     if (!a || a.type !== 'queued_command' || a.isMeta === true || c.j.isMeta === true) return;
     let text = '';
-    let images = 0;
+    const pics: unknown[] = [];
     if (typeof a.prompt === 'string') text = a.prompt;
     else if (Array.isArray(a.prompt)) {
       const texts: string[] = [];
       for (const raw of a.prompt) {
         const b = rec(raw);
         if (b?.type === 'text' && typeof b.text === 'string') texts.push(b.text);
-        else if (b?.type === 'image') images++;
+        else if (b?.type === 'image') pics.push(b);
       }
       text = texts.join('\n');
     }
     if (text.trimStart().startsWith('<task-notification>')) return this.notification(c, text.trim());
     if (a.commandMode !== undefined && a.commandMode !== 'prompt') return;
-    this.userText(c, text, images);
+    this.userText(c, text, pics);
   }
 }
 

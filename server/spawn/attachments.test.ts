@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { tempDir } from '../test/fixtures';
-import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_SPAWN, AttachmentStore, parseAttachment, promptWithAttachments, safeFileName, writeAttachments } from './attachments';
+import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_SPAWN, AttachmentStore, parseAttachment, promptWithAttachments, safeFileName, writeAttachments, writeMessageAttachments } from './attachments';
 
 const b64 = (s: string) => Buffer.from(s).toString('base64');
 
@@ -59,6 +59,15 @@ describe('anexos do Novo agente', () => {
     expect(readFileSync(paths[1], 'utf8')).toBe('2');
     expect(readdirSync(dir)).toHaveLength(3);
     expect(writeAttachments(root, 'x', [])).toEqual([]);
+  });
+
+  it('anexos de mensagens: duas fotos image.jpg no mesmo segundo vão para pastas diferentes', () => {
+    const root = tempDir().dir;
+    const photo = [{ name: 'image.jpg', type: 'image/jpeg', data: Buffer.from('x') }];
+    const [a] = writeMessageAttachments(root, photo);
+    const [b] = writeMessageAttachments(root, photo);
+    expect(a).not.toBe(b);
+    expect(readdirSync(root)).toHaveLength(2);
   });
 
   it('o pedido ganha a lista dos caminhos', () => {

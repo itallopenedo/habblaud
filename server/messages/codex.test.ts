@@ -10,6 +10,7 @@ import { setQuiet } from '../log';
 import { NameStore } from '../model/names';
 import { Office } from '../model/office';
 import { FAKE_CODEX_RUNS, fakeCodexCalls, writeFakeCodex } from '../test/fake-codex';
+import { AttachmentStore } from '../spawn/attachments';
 import { tempDir } from '../test/fixtures';
 import { createCodexQueueRunner, findCodexBin, firstLine, queueArgs, type CodexQueueJob, type CodexQueueResult, type CodexQueueRunner } from './codex';
 import {
@@ -24,6 +25,7 @@ import {
   QUEUED_TIMEOUT_MS,
   SENT_TIMEOUT_MS,
   type CodexDeliveryOptions,
+  type MessageRegistryOptions,
   type SendResult,
 } from './registry';
 
@@ -106,7 +108,7 @@ function manualRunner(): { run: CodexQueueRunner; jobs: CodexQueueJob[]; finish:
   };
 }
 
-function setup(codex?: Partial<CodexDeliveryOptions> | null) {
+function setup(codex?: Partial<CodexDeliveryOptions> | null, extra: Partial<MessageRegistryOptions> = {}) {
   let now = 1_000_000;
   const clock = { now: () => now, advance: (ms: number) => (now += ms) };
   let registry: MessageRegistry | undefined;
@@ -127,6 +129,7 @@ function setup(codex?: Partial<CodexDeliveryOptions> | null) {
     office,
     codex: codex === null ? undefined : { homeOf: (acc) => (acc === '.codex' ? codexHome : undefined), ...codex },
     now: clock.now,
+    ...extra,
   });
   return { office, registry, clock };
 }
@@ -231,6 +234,33 @@ describe('MessageRegistry: Codex pelo auxiliar do host (Docker)', () => {
     }
     expect(ids.map((id) => registry.get(id)!.status)).toEqual(['delivered', 'delivered', 'delivered', 'delivered', 'delivered']);
     expect(registry.get(other)!.status).toBe('delivered');
+  });
+
+  it('anexo ao Codex: a mensagem espera a gravação (e segura as seguintes) e sai com os caminhos no texto', async () => {
+    const store = new AttachmentStore();
+    const { registry } = setup(undefined, { attachments: store, writeFiles: async (_id, files) => files.map((f) => `/Users/voce/.habblaud/attachments/x/${f.name}`) });
+    registry.codexPoll({});
+    const { id: aid } = store.put({ name: 'tela.png', type: 'image/png', data: Buffer.from('png') }) as { id: string };
+    const first = sent(registry.send({ agentId: MAIN, text: 'veja', attachments: [aid] }));
+    const second = sent(registry.send({ agentId: MAIN, text: 'depois' }));
+    expect(registry.codexPoll({})).toEqual([]);
+    await new Promise((ok) => setImmediate(ok));
+    const [m] = registry.codexPoll({});
+    expect(m).toMatchObject({ id: first, text: 'veja\n\nAnexo enviado pelo Habblaud (leia antes de começar):\n- /Users/voce/.habblaud/attachments/x/tela.png' });
+    expect(registry.get(second)!.status).toBe('queued');
+  });
+
+  it('anexo ao Codex (modo Node) que falha ao gravar: a mensagem falha e a seguinte sai logo', async () => {
+    const store = new AttachmentStore();
+    const m = manualRunner();
+    const { registry } = setup({ run: m.run }, { attachments: store, writeFiles: async () => { throw new Error('disco cheio'); } });
+    const { id: aid } = store.put({ name: 'tela.png', type: 'image/png', data: Buffer.from('png') }) as { id: string };
+    const first = sent(registry.send({ agentId: MAIN, text: 'veja', attachments: [aid] }));
+    const second = sent(registry.send({ agentId: MAIN, text: 'depois' }));
+    await new Promise((ok) => setImmediate(ok));
+    expect(registry.get(first)!.status).toBe('failed');
+    expect(m.jobs.map((j) => j.text)).toEqual(['depois']);
+    expect(registry.get(second)!.status).toBe('sent');
   });
 
   it('sem entregador: o Codex não recebe (com o motivo); subagente do Codex também não', () => {
