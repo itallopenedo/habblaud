@@ -11,10 +11,10 @@
 //
 // Binário: HABBLAUD_CODEX_BIN ou `codex` do PATH. Nunca roda o Codex com -c, --enable, --disable nem --no-daemon, e
 // confere cada mensagem antes (id de thread, pasta do Codex que existe). O texto das mensagens nunca vai para a tela.
-// Também começa os agentes novos pedidos no escritório (com HABBLAUD_PTY=1 no Habblaud; anexos gravados em
-// ~/.habblaud/attachments/), lê os arquivos das entregas (só de pastas de projeto conhecidas, da pasta temporária e dos
+// Também começa os agentes novos pedidos no escritório (com HABBLAUD_PTY=1 no Habblaud), grava os anexos do Novo
+// agente e das mensagens em ~/.habblaud/attachments/, lê os arquivos das entregas (só de pastas de projeto conhecidas, da pasta temporária e dos
 // anexos) e transcreve o ditado com o Whisper local (whisper-cli + ffmpeg + modelo; ver server/dictation/whisper.ts).
-// Arquivos e ditado usam rodadas com espera: o Habblaud só responde quando chega trabalho (ou a cada 20 s).
+// Arquivos, anexos e ditado usam rodadas com espera: o Habblaud só responde quando chega trabalho (ou a cada 20 s).
 // Ctrl+C para parar.
 import { statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
@@ -321,6 +321,45 @@ export async function filesRound(
   return { state: 'ok', results: results.map(({ id, ok, error }) => ({ id, ok, ...(error ? { error } : {}) })) };
 }
 
+/**
+ * Anexos das mensagens (Docker): busca os arquivos (POST /api/host/attachments/poll), confere com checkFiles e grava em
+ * ~/.habblaud/attachments/ (writeAttachments, como os do Novo agente); devolve os caminhos em
+ * /api/host/attachments/ack. Nunca lança.
+ */
+export async function attachmentsRound(
+  post: Post,
+  log: (line: string) => void = () => {},
+  write: (id: string, files: readonly Attachment[]) => string[] = (id, files) => writeAttachments(attachmentsRoot(), id, files),
+  opts: { wait?: boolean } = {},
+): Promise<RoundResult> {
+  const polled = await post(`/api/host/attachments/poll${opts.wait ? '?wait=1' : ''}`, {});
+  if (!polled) return { state: 'down' };
+  const list = rec(polled.json)?.writes;
+  if (polled.status !== 200 || !Array.isArray(list)) return { state: 'refused', status: polled.status };
+  const results: Array<BridgeResult & { paths?: string[] }> = [];
+  for (const raw of list) {
+    const id = typeof rec(raw)?.id === 'string' ? (rec(raw)!.id as string) : '';
+    if (!id) continue;
+    const files = checkFiles(rec(raw)?.files);
+    if ('error' in files || !files.length) {
+      const error = 'error' in files ? files.error : tr('anexos inválidos');
+      results.push({ id, ok: false, error });
+      log(tr('✗ anexo de mensagem recusado: {0}', [error]));
+      continue;
+    }
+    try {
+      results.push({ id, ok: true, paths: write(id, files) });
+      log(files.length > 1 ? tr('✓ {0} anexos de mensagem gravados', [files.length]) : tr('✓ 1 anexo de mensagem gravado'));
+    } catch (err) {
+      const error = String((err as Error)?.message ?? err);
+      results.push({ id, ok: false, error });
+      log(tr('✗ anexo de mensagem: {0}', [error]));
+    }
+  }
+  if (results.length) await post('/api/host/attachments/ack', { results });
+  return { state: 'ok', results: results.map(({ id, ok, error }) => ({ id, ok, ...(error ? { error } : {}) })) };
+}
+
 /** Repete uma rodada com espera: fora do ar, de 2 em 2 s; recusada (recurso desligado), a cada minuto. */
 async function waitLoop(roundFn: () => Promise<RoundResult>): Promise<never> {
   for (;;) {
@@ -364,6 +403,7 @@ async function main(): Promise<void> {
     const roots = [...tempRoots(), attachmentsRoot()];
     const inside = (p: string) => insideKnownFolder(p, { accountDirs, roots });
     void waitLoop(() => filesRound(waitPost, log, undefined, undefined, { inside, wait: true }));
+    void waitLoop(() => attachmentsRound(waitPost, log, undefined, { wait: true }));
     if (transcribe) {
       const t = transcribe;
       void waitLoop(() => dictationRound(waitPost, t, log, { wait: true }));

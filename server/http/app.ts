@@ -17,6 +17,7 @@ import type { TerminalStreams } from './terminal';
 import { tr } from '../../shared/i18n';
 import type { SpawnService } from '../spawn/spawn';
 import { ATTACHMENT_BODY_MAX, parseAttachment, type AttachmentStore } from '../spawn/attachments';
+import type { HostFileWriter } from '../spawn/host-writer';
 import type { SpawnFolder } from '../spawn/folders';
 import { AUDIO_BODY_MAX, type DictationService } from '../dictation/dictation';
 import type { DeliveryIndex } from '../deliveries/deliveries';
@@ -69,6 +70,8 @@ export interface ApiDeps {
   spawnFolders?: () => Promise<SpawnFolder[]>;
   /** Anexos do "Novo agente" (POST /api/spawn/attachments) e das mensagens (POST /api/attachments); spawn/attachments.ts. */
   attachments?: AttachmentStore;
+  /** Anexos das mensagens no Docker: o auxiliar do host grava (/api/host/attachments/*; spawn/host-writer.ts). */
+  attachmentWriter?: HostFileWriter;
   /** Ditado (/api/dictation e, para o auxiliar do host, /api/host/dictation/*; dictation/dictation.ts). */
   dictation?: DictationService;
   /** Entregas (GET /api/deliveries e os anexos em /api/deliveries/file/:id; deliveries/deliveries.ts). */
@@ -606,6 +609,26 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
             (err) => fail(res, err),
           );
       } else sendJson(res, 404, { error: tr('rota desconhecida') });
+      return true;
+    }
+    if (path === '/api/host/attachments/poll' || path === '/api/host/attachments/ack') {
+      // Só o auxiliar do host, pela porta local (nunca pela remota); fora do Docker, só pelo loopback.
+      const writer = deps.attachmentWriter;
+      if (method !== 'POST') methodNotAllowed(res, 'POST');
+      else if (!writer) sendJson(res, 403, { error: tr('anexos desligados') });
+      else if (!trusted(req) || (!deps.inDocker && !isLoopbackAddress(req.socket.remoteAddress))) {
+        sendJson(res, 403, { error: denied(req, tr('só o auxiliar do próprio computador')) });
+      } else if (path === '/api/host/attachments/poll') {
+        req.resume();
+        hostWait(res, url, (ms, signal) => writer.pollWait(ms, signal)).then((list) => list && sendJson(res, 200, { writes: list }), (err) => fail(res, err));
+      } else {
+        readJson(req, 512 * 1024)
+          .then((body) => {
+            writer.ack(body);
+            sendJson(res, 200, { ok: true });
+          })
+          .catch((err) => fail(res, err));
+      }
       return true;
     }
     if (path === '/api/host/files/poll' || path === '/api/host/files/ack') {

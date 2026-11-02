@@ -3288,6 +3288,13 @@ export const EN: Readonly<Record<string, string>> = {
   "O carimbo não foi deixado. Tente de novo.": "The stamp wasn't left. Try again.",
 
   // Fase 4 — mídia
+  "anexos demais sendo gravados: tente de novo": "too many attachments being saved: try again",
+  "o computador não gravou os anexos a tempo": "the computer didn't save the attachments in time",
+  "o computador não gravou os anexos": "the computer didn't save the attachments",
+  "✗ anexo de mensagem recusado: {0}": "✗ message attachment refused: {0}",
+  "✓ {0} anexos de mensagem gravados": "✓ {0} message attachments saved",
+  "✓ 1 anexo de mensagem gravado": "✓ 1 message attachment saved",
+  "✗ anexo de mensagem: {0}": "✗ message attachment: {0}",
   "anexos inválidos (no máximo {0})": "invalid attachments (at most {0})",
   "imagem indisponível: abra o terminal de novo": "image unavailable: open the terminal again",
   "Imagem {0}": "Image {0}",

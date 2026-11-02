@@ -2,11 +2,12 @@
 // /api/codex/bridge/*): a trava das mensagens (recurso ligado + Host local), a rodada completa página → auxiliar →
 // codex queue (binário falso) → confirmação, e a conferência de cada mensagem antes de rodar o comando.
 import http from 'node:http';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { checkMessage, dictationRound, filesRound, httpPost, parseArgs, round, spawnRound, type Post } from '../../scripts/codex-bridge';
+import { attachmentsRound, checkMessage, dictationRound, filesRound, httpPost, parseArgs, round, spawnRound, type Post } from '../../scripts/codex-bridge';
+import { writeAttachments } from '../spawn/attachments';
 import { spawnUrl } from '../spawn/spawn';
 import { AccountsService } from '../accounts/service';
 import { createApiHandler } from '../http/app';
@@ -278,5 +279,36 @@ describe('spawnRound (agentes novos pelo auxiliar)', () => {
   it('Habblaud fora do ar ou recusando', async () => {
     expect(await spawnRound(async () => null, async () => ({ ok: true }))).toEqual({ state: 'down' });
     expect(await spawnRound(async () => ({ status: 403, json: { error: 'x' } }), async () => ({ ok: true }))).toEqual({ state: 'refused', status: 403 });
+  });
+});
+
+describe('attachmentsRound (anexos das mensagens pelo auxiliar)', () => {
+  it('confere, grava como os do Novo agente e devolve os caminhos; recusa o que não passa', async () => {
+    let acked: unknown;
+    const paths: string[] = [];
+    const post: Post = async (path, body) => {
+      paths.push(path);
+      if (path.startsWith('/api/host/attachments/poll')) {
+        return {
+          status: 200,
+          json: {
+            writes: [
+              { id: 'w1', files: [{ name: '../foto.jpg', type: 'image/jpeg', data: Buffer.from('jpeg').toString('base64') }] },
+              { id: 'w2', files: [{ name: 'x', data: 'não é base64!' }] },
+            ],
+          },
+        };
+      }
+      acked = body;
+      return { status: 200, json: { ok: true } };
+    };
+    const r = await attachmentsRound(post, () => {}, (id, files) => writeAttachments(tmp.dir, id, files), { wait: true });
+    expect(paths[0]).toBe('/api/host/attachments/poll?wait=1');
+    expect(r).toEqual({ state: 'ok', results: [{ id: 'w1', ok: true }, { id: 'w2', ok: false, error: 'anexo ilegível' }] });
+    const written = (acked as { results: Array<{ paths?: string[] }> }).results[0].paths!;
+    expect(written).toHaveLength(1);
+    expect(written[0].startsWith(`${tmp.dir}/`) && written[0].endsWith('/foto.jpg')).toBe(true);
+    expect(readFileSync(written[0], 'utf8')).toBe('jpeg');
+    expect(await attachmentsRound(async () => null)).toEqual({ state: 'down' });
   });
 });

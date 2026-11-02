@@ -3289,6 +3289,13 @@ export const ES: Readonly<Record<string, string>> = {
   "O carimbo não foi deixado. Tente de novo.": "El sello no se dejó. Inténtalo de nuevo.",
 
   // Fase 4 — mídia
+  "anexos demais sendo gravados: tente de novo": "demasiados adjuntos guardándose: inténtalo de nuevo",
+  "o computador não gravou os anexos a tempo": "el equipo no guardó los adjuntos a tiempo",
+  "o computador não gravou os anexos": "el equipo no guardó los adjuntos",
+  "✗ anexo de mensagem recusado: {0}": "✗ adjunto de mensaje rechazado: {0}",
+  "✓ {0} anexos de mensagem gravados": "✓ {0} adjuntos de mensaje guardados",
+  "✓ 1 anexo de mensagem gravado": "✓ 1 adjunto de mensaje guardado",
+  "✗ anexo de mensagem: {0}": "✗ adjunto de mensaje: {0}",
   "anexos inválidos (no máximo {0})": "adjuntos no válidos (como máximo {0})",
   "imagem indisponível: abra o terminal de novo": "imagen no disponible: abre la terminal de nuevo",
   "Imagem {0}": "Imagen {0}",

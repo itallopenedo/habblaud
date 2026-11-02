@@ -44,6 +44,7 @@ import type { WorldLocale } from '../shared/world/protocol';
 import { createCliRunner, createOpener, SpawnService } from './spawn/spawn';
 import { runnableClaudeBin } from './claude-bin';
 import { AttachmentStore, attachmentsRoot, writeAttachments } from './spawn/attachments';
+import { HostFileWriter } from './spawn/host-writer';
 import { recentFolders } from './spawn/folders';
 import { isDemoId } from '../shared/timeline';
 import { DictationService } from './dictation/dictation';
@@ -266,6 +267,8 @@ const whisper = config.messages && !config.inDocker ? findWhisper() : undefined;
 const dictation = config.messages
   ? new DictationService(whisper && !('missing' in whisper) ? { transcriber: createWhisperTranscriber(whisper) } : {})
   : undefined;
+// Anexos das mensagens no Docker: quem grava no Mac é o auxiliar do host (npm run codex:bridge).
+const attachmentWriter = config.messages && config.inDocker ? new HostFileWriter() : undefined;
 const messages = config.messages
   ? new MessageRegistry({
       office,
@@ -277,8 +280,8 @@ const messages = config.messages
         homeOf: (account) => accounts.entriesOf('codex').find((e) => e.id === account)?.detected.configDir,
       },
       attachments,
-      // Modo Node: o próprio servidor grava em ~/.habblaud/attachments (no Docker, ver a Task 6).
-      writeFiles: config.inDocker ? undefined : async (id, files) => writeAttachments(attachmentsRoot(), id, files),
+      // Modo Node: o próprio servidor grava em ~/.habblaud/attachments; no Docker, o auxiliar do host.
+      writeFiles: attachmentWriter ? (_id, files) => attachmentWriter.write(files) : async (id, files) => writeAttachments(attachmentsRoot(), id, files),
     })
   : undefined;
 late.messages = messages;
@@ -366,6 +369,7 @@ const api = createApiHandler({
   pty: ptys ? createPtyRoutes(ptys) : undefined,
   spawn,
   attachments,
+  attachmentWriter,
   dictation,
   deliveries,
   files: deliveryFiles,

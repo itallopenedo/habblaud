@@ -344,6 +344,7 @@ describe('porta remota', () => {
       ['POST', '/api/codex/bridge/poll'],
       ['POST', '/api/codex/events'],
       ['POST', '/api/host/files/poll'],
+      ['POST', '/api/host/attachments/poll'],
       ['POST', '/api/host/spawn/poll'],
     ];
     for (const [method, path] of blocked) {
