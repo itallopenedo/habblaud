@@ -3350,4 +3350,5 @@ export const ES: Readonly<Record<string, string>> = {
   "Seta para cima": "Flecha arriba",
   "Seta para baixo": "Flecha abajo",
   "Seta para a direita": "Flecha derecha",
+  "fora da pasta do agente": "fuera de la carpeta del agente",
 };

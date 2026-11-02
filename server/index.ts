@@ -237,6 +237,7 @@ const deliveryFiles = deliveries
 // Seção Arquivos da gaveta: o que o agente escreveu, aberto pelo mesmo leitor das entregas (mesma trava).
 const agentFiles = deliveryFiles
   ? new AgentFiles({
+      roots: fileRoots,
       transcriptPathOf: (id) => agents.transcriptPathOf(id),
       cwdOf: (id) => {
         const a = office.get(id);

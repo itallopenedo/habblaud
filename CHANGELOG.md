@@ -12,6 +12,10 @@ do meio (0.**3**.0).
 
 ### Corrigido
 
+- **Aba Arquivos abre só o que está na pasta do próprio agente.** Antes valia qualquer pasta com projeto do Claude Code
+  (e `~/.claude/projects/-Users-fulano` faz quase o home inteiro contar). Agora o arquivo precisa estar na pasta do
+  agente (ou nas temporárias e nos anexos do Habblaud); um agente aberto no home continua vendo o que está no home.
+  As entregas seguem a regra de antes.
 - **Arquivos do agente no modo Node só das pastas de projeto.** Sem o Docker, a seção Arquivos e as entregas abriam
   qualquer arquivo de ver que o agente citasse; agora valem só as pastas de projeto que o Claude Code conhece, as
   temporárias e os anexos do Habblaud, a mesma regra que o auxiliar do host já seguia no Docker.

@@ -591,6 +591,38 @@ describe('porta remota', () => {
     }
   });
 
+  it('aba Arquivos: arquivo fora da pasta do agente é recusado (403); dentro, abre', async () => {
+    const tmp = tempDir();
+    try {
+      const proj = join(tmp.dir, 'loja');
+      const outro = join(tmp.dir, 'outro');
+      mkdirSync(proj);
+      mkdirSync(outro);
+      writeFileSync(join(proj, 'a.md'), 'dentro');
+      writeFileSync(join(outro, 'b.md'), 'conteudo-de-outro-projeto');
+      const transcript = join(tmp.dir, 't.jsonl');
+      writeLines(transcript, [
+        L.assistant([L.tool('w1', 'Write', { file_path: join(proj, 'a.md'), content: 'x' })]),
+        L.assistant([L.tool('w2', 'Write', { file_path: join(outro, 'b.md'), content: 'x' })]),
+      ]);
+      // Roots vazias: o tmp.dir (em /var/folders) não vale como pasta temporária neste teste.
+      const s = await start(['terminal'], {
+        agentFiles: new AgentFiles({ transcriptPathOf: () => transcript, cwdOf: () => proj, roots: [] }),
+        files: new FileFetcher({ direct: true }),
+      });
+      const headers = { Cookie: await login(s.remoteBase) };
+      const { files } = JSON.parse((await request(s.remoteBase, '/api/agents/a1/files', { headers })).body);
+      const idOf = (name: string) => files.find((f: { name: string }) => f.name === name).id;
+      const dentro = await request(s.remoteBase, `/api/agents/a1/files/${idOf('a.md')}`, { headers });
+      expect([dentro.status, dentro.body]).toEqual([200, 'dentro']);
+      const fora = await request(s.remoteBase, `/api/agents/a1/files/${idOf('b.md')}`, { headers });
+      expect(fora.status).toBe(403);
+      expect(fora.body).not.toContain('conteudo-de-outro-projeto');
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
   it('aba Arquivos: só com terminal liberado; lista e abre pelo id, nunca pelo caminho', async () => {
     const tmp = tempDir();
     try {

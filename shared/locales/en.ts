@@ -3349,4 +3349,5 @@ export const EN: Readonly<Record<string, string>> = {
   "Seta para cima": "Up arrow",
   "Seta para baixo": "Down arrow",
   "Seta para a direita": "Right arrow",
+  "fora da pasta do agente": "outside the agent's folder",
 };
