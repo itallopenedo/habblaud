@@ -43,7 +43,7 @@ import { getLocale, tr } from '../shared/i18n';
 import type { WorldLocale } from '../shared/world/protocol';
 import { createCliRunner, createOpener, SpawnService } from './spawn/spawn';
 import { runnableClaudeBin } from './claude-bin';
-import { AttachmentStore } from './spawn/attachments';
+import { AttachmentStore, attachmentsRoot, writeAttachments } from './spawn/attachments';
 import { recentFolders } from './spawn/folders';
 import { isDemoId } from '../shared/timeline';
 import { DictationService } from './dictation/dictation';
@@ -276,6 +276,9 @@ const messages = config.messages
         run: codexBin ? createCodexQueueRunner(codexBin) : undefined,
         homeOf: (account) => accounts.entriesOf('codex').find((e) => e.id === account)?.detected.configDir,
       },
+      attachments,
+      // Modo Node: o próprio servidor grava em ~/.habblaud/attachments (no Docker, ver a Task 6).
+      writeFiles: config.inDocker ? undefined : async (id, files) => writeAttachments(attachmentsRoot(), id, files),
     })
   : undefined;
 late.messages = messages;

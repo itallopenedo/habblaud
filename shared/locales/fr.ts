@@ -3305,6 +3305,7 @@ export const FR: Readonly<Record<string, string>> = {
   "O carimbo não foi deixado. Tente de novo.": "Le tampon n'a pas été laissé. Réessayez.",
 
   // Fase 4 — mídia
+  "anexos inválidos (no máximo {0})": "pièces jointes invalides ({0} au maximum)",
   "imagem indisponível: abra o terminal de novo": "image indisponible : rouvrez le terminal",
   "Imagem {0}": "Image {0}",
   "Ampliar a imagem {0}": "Agrandir l'image {0}",

@@ -24,6 +24,7 @@ import type { Activity, AgentInfo, InboxMessage, OutboxMessage } from '../../sha
 import { errMsg, log } from '../log';
 import type { CodexQueueResult, CodexQueueRunner } from './codex';
 import { tr } from '../../shared/i18n';
+import { ATTACHMENTS_PER_SPAWN, promptWithAttachments, type Attachment, type AttachmentStore } from '../spawn/attachments';
 
 /** Sessão que perguntou pela caixa de entrada há até este tempo: recebe mensagens (canMessage). */
 export const PRESENCE_MS = 10_000;
@@ -93,6 +94,13 @@ export interface MessageRegistryOptions {
   sentTimeoutMs?: number;
   keepMs?: number;
   demoDeliveryMs?: number;
+  /** Depósito dos anexos (POST /api/attachments); ausente = mensagens sem anexos. */
+  attachments?: AttachmentStore;
+  /**
+   * Grava os anexos de uma mensagem no computador das sessões e devolve os caminhos, na ordem. Modo Node: o próprio
+   * servidor (writeAttachments); Docker: o auxiliar do host (spawn/host-writer.ts). Rejeição = a mensagem falha.
+   */
+  writeFiles?: (messageId: string, files: readonly Attachment[]) => Promise<string[]>;
 }
 
 export type SendResult = { message: OutboxMessage } | { error: 'not-found' | 'too-many' } | { error: 'unavailable'; reason: string };
@@ -131,6 +139,8 @@ interface Entry {
   via?: 'node' | 'bridge';
   /** Falhou por falta de confirmação: uma confirmação atrasada ainda corrige a situação. */
   late?: boolean;
+  /** Anexos sendo gravados: a mensagem (e as seguintes do agente) ainda não sai. */
+  staging?: true;
 }
 
 type Rec = Record<string, unknown>;
@@ -161,19 +171,29 @@ function unavailableReason(a: AgentInfo, reachable: boolean): string | undefined
   return undefined;
 }
 
-/** Corpo de POST /api/messages: `{agentId, text}`. O texto não é alterado (nem aparado). */
-export function parseSend(raw: unknown): { agentId: string; text: string } | { agentId: string; questionId: string; option: number } {
+/**
+ * Corpo de POST /api/messages: `{agentId, text, attachments?}` (`attachments` = ids de POST /api/attachments). O texto
+ * não é alterado (nem aparado); com anexos ele pode vir vazio.
+ */
+export function parseSend(raw: unknown): { agentId: string; text: string; attachments?: string[] } | { agentId: string; questionId: string; option: number } {
   const r = rec(raw);
   const agentId = shortStr(r?.agentId, ID_MAX);
   if (r && agentId && ('questionId' in r || 'option' in r)) {
     const questionId = shortStr(r.questionId, ID_MAX);
-    if (!questionId || !Number.isInteger(r.option) || (r.option as number) < 0 || (r.option as number) >= 6 || 'text' in r) throw new InvalidRequest('esperado {agentId, questionId, option}');
+    if (!questionId || !Number.isInteger(r.option) || (r.option as number) < 0 || (r.option as number) >= 6 || 'text' in r || 'attachments' in r) {
+      throw new InvalidRequest('esperado {agentId, questionId, option}');
+    }
     return { agentId, questionId, option: r.option as number };
   }
   if (!r || !agentId || typeof r.text !== 'string') throw new InvalidRequest('esperado {agentId, text}');
-  if (!r.text.trim()) throw new InvalidRequest(tr('a mensagem está vazia'));
+  const ids = r.attachments;
+  if (ids !== undefined && (!Array.isArray(ids) || ids.length > ATTACHMENTS_PER_SPAWN || ids.some((id) => !shortStr(id, ID_MAX)))) {
+    throw new InvalidRequest(tr('anexos inválidos (no máximo {0})', [ATTACHMENTS_PER_SPAWN]));
+  }
+  const attachments = Array.isArray(ids) && ids.length ? (ids as string[]) : undefined;
+  if (!r.text.trim() && !attachments) throw new InvalidRequest(tr('a mensagem está vazia'));
   if (r.text.length > MAX_TEXT) throw new InvalidRequest(tr('a mensagem passa de 20.000 caracteres'));
-  return { agentId, text: r.text };
+  return attachments ? { agentId, text: r.text, attachments } : { agentId, text: r.text };
 }
 
 /** Resultados de uma confirmação ({results: [{id, ok, error?}]}): os válidos, até ACK_MAX. */
@@ -285,6 +305,14 @@ export class MessageRegistry {
     let open = 0;
     for (const e of this.messages.values()) if (e.msg.agentId === agentId && !isFinal(e)) open++;
     if (open >= MAX_OPEN) return { error: 'too-many' };
+    const ids = 'attachments' in input ? input.attachments : undefined;
+    let files: Attachment[] = [];
+    if (ids) {
+      if (demo || !this.opts.attachments || !this.opts.writeFiles) return { error: 'unavailable', reason: tr('anexos desligados') };
+      const taken = this.opts.attachments.take(ids);
+      if ('error' in taken) throw new InvalidRequest(taken.error);
+      files = taken;
+    }
 
     const now = this.now();
     const id = `m-${now.toString(36)}-${++this.seq}-${randomBytes(9).toString('base64url')}`;
@@ -297,7 +325,8 @@ export class MessageRegistry {
     else if (real?.provider === 'codex') entry.codex = true;
     this.messages.set(id, entry);
     const out = { ...entry.msg };
-    if (entry.codex) this.pumpCodex();
+    if (files.length) this.stage(entry, files);
+    else if (entry.codex) this.pumpCodex();
     return { message: out };
   }
 
@@ -331,6 +360,7 @@ export class MessageRegistry {
     const out: InboxMessage[] = [];
     for (const e of this.messages.values()) {
       if (out.length >= INBOX_BATCH) break;
+      if (e.staging && e.msg.agentId === agent.id) break; // gravando o anexo: ela e as seguintes esperam (a ordem vale)
       if (e.demo || e.codex || e.msg.agentId !== agent.id || e.msg.status !== 'queued' || e.target !== session) continue;
       if (e.questionId && this.opts.desktopAnswer?.(agent.id, e.questionId, e.option!) !== e.text) {
         this.fail(e, now, ERR_DESKTOP_CHANGED);
@@ -385,6 +415,7 @@ export class MessageRegistry {
       if (out.length >= INBOX_BATCH) break;
       if (!e.codex || e.msg.status !== 'queued' || busy.has(e.msg.agentId)) continue;
       busy.add(e.msg.agentId);
+      if (e.staging) continue; // gravando o anexo: segura as seguintes do agente
       const target = this.codexTarget(e, now);
       if (!target) continue;
       this.setStatus(e, 'sent', now);
@@ -455,6 +486,24 @@ export class MessageRegistry {
 
   // ---------------------------------------------------------------- internos
 
+  /** Grava os anexos e só então libera a mensagem, com os caminhos no fim do texto (promptWithAttachments). */
+  private stage(e: Entry, files: Attachment[]): void {
+    e.staging = true;
+    const bytes = files.reduce((n, f) => n + f.data.length, 0);
+    const done = (r: { paths: string[] } | { error: string }) => {
+      this.opts.attachments?.release(bytes);
+      if (this.messages.get(e.msg.id) !== e || isFinal(e)) return;
+      delete e.staging;
+      if ('error' in r) return this.fail(e, this.now(), r.error);
+      e.text = promptWithAttachments(e.text, r.paths);
+      if (e.codex) this.pumpCodex();
+    };
+    this.opts.writeFiles!(e.msg.id, files).then(
+      (paths) => done({ paths }),
+      (err: unknown) => done({ error: tr('não deu para gravar os anexos ({0})', [errMsg(err)]) }),
+    );
+  }
+
   private bridgeRecent(): boolean {
     return this.bridgeAt !== undefined && this.now() - this.bridgeAt < this.presenceMs;
   }
@@ -482,6 +531,7 @@ export class MessageRegistry {
     for (const e of this.messages.values()) {
       if (!e.codex || e.msg.status !== 'queued' || busy.has(e.msg.agentId)) continue;
       busy.add(e.msg.agentId);
+      if (e.staging) continue; // gravando o anexo: segura as seguintes do agente
       const target = this.codexTarget(e, now);
       if (!target) continue;
       this.setStatus(e, 'sent', now);

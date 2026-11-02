@@ -3289,6 +3289,7 @@ export const ES: Readonly<Record<string, string>> = {
   "O carimbo não foi deixado. Tente de novo.": "El sello no se dejó. Inténtalo de nuevo.",
 
   // Fase 4 — mídia
+  "anexos inválidos (no máximo {0})": "adjuntos no válidos (como máximo {0})",
   "imagem indisponível: abra o terminal de novo": "imagen no disponible: abre la terminal de nuevo",
   "Imagem {0}": "Imagen {0}",
   "Ampliar a imagem {0}": "Ampliar la imagen {0}",

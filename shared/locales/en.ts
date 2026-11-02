@@ -3288,6 +3288,7 @@ export const EN: Readonly<Record<string, string>> = {
   "O carimbo não foi deixado. Tente de novo.": "The stamp wasn't left. Try again.",
 
   // Fase 4 — mídia
+  "anexos inválidos (no máximo {0})": "invalid attachments (at most {0})",
   "imagem indisponível: abra o terminal de novo": "image unavailable: open the terminal again",
   "Imagem {0}": "Image {0}",
   "Ampliar a imagem {0}": "Enlarge image {0}",

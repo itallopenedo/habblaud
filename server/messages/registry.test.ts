@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentInfo } from '../../shared/types';
 import { setQuiet } from '../log';
 import { NameStore } from '../model/names';
+import { AttachmentStore } from '../spawn/attachments';
 import { Office } from '../model/office';
 import {
   ERR_GONE,
@@ -16,6 +17,7 @@ import {
   KEEP_MS,
   MAX_OPEN,
   MessageRegistry,
+  parseSend,
   PRESENCE_MS,
   QUEUED_TIMEOUT_MS,
   SENT_TIMEOUT_MS,
@@ -373,5 +375,72 @@ describe('MessageRegistry: demo', () => {
     office.setDemo(false);
     registry.tick();
     expect(registry.get(id)).toMatchObject({ status: 'failed', error: ERR_GONE });
+  });
+});
+
+describe('MessageRegistry: anexos', () => {
+  const file = (name: string) => ({ name, type: 'image/jpeg', data: Buffer.from(name) });
+  const flush = () => new Promise((ok) => setImmediate(ok));
+  const at = (name: string) => `/Users/voce/.habblaud/attachments/20261101-120000-m/${name}`;
+
+  it('parseSend: ids de anexo (textos, até 8); com anexo o texto pode vir vazio; resposta de pergunta não leva anexo', () => {
+    expect(parseSend({ agentId: MAIN, text: '', attachments: ['a1'] })).toEqual({ agentId: MAIN, text: '', attachments: ['a1'] });
+    expect(parseSend({ agentId: MAIN, text: 'oi', attachments: [] })).toEqual({ agentId: MAIN, text: 'oi' });
+    expect(() => parseSend({ agentId: MAIN, text: '', attachments: [] })).toThrow(/vazia/);
+    for (const bad of ['a1', [1], [''], Array.from({ length: 9 }, (_, i) => `a${i}`)]) {
+      expect(() => parseSend({ agentId: MAIN, text: 'oi', attachments: bad })).toThrow(/anexos inválidos/);
+    }
+    expect(() => parseSend({ agentId: MAIN, questionId: 'q', option: 0, attachments: ['a1'] })).toThrow(/questionId/);
+  });
+
+  it('foto na mensagem: grava primeiro e a sessão recebe o texto com os caminhos no fim; a seguinte espera atrás', async () => {
+    const store = new AttachmentStore();
+    const writes: Array<{ id: string; names: string[] }> = [];
+    const { registry } = setup({
+      attachments: store,
+      writeFiles: async (id, files) => {
+        writes.push({ id, names: files.map((f) => f.name) });
+        return files.map((f) => at(f.name));
+      },
+    });
+    registry.inbox({ session: SESSION });
+    const { id: aid } = store.put(file('foto.jpg')) as { id: string };
+    const id = sent(registry.send({ agentId: MAIN, text: 'o que é isso?', attachments: [aid] }));
+    const next = sent(registry.send({ agentId: MAIN, text: 'e depois isto' }));
+    expect(registry.inbox({ session: SESSION })).toEqual([]);
+    await flush();
+    expect(writes).toEqual([{ id, names: ['foto.jpg'] }]);
+    expect(registry.inbox({ session: SESSION })).toEqual([
+      { id, text: `o que é isso?\n\nAnexo enviado pelo Habblaud (leia antes de começar):\n- ${at('foto.jpg')}` },
+      { id: next, text: 'e depois isto' },
+    ]);
+  });
+
+  it('id desconhecido, expirado ou já usado: 400 (InvalidRequest) e nada entra na fila', async () => {
+    let now = 0;
+    const store = new AttachmentStore(() => now);
+    const { registry } = setup({ attachments: store, writeFiles: async (_id, files) => files.map((f) => at(f.name)) });
+    registry.inbox({ session: SESSION });
+    expect(() => registry.send({ agentId: MAIN, text: 'oi', attachments: ['nao-existe'] })).toThrow(/expirou/);
+    const { id: old } = store.put(file('a.jpg')) as { id: string };
+    now += 31 * 60_000;
+    expect(() => registry.send({ agentId: MAIN, text: 'oi', attachments: [old] })).toThrow(/expirou/);
+    const { id: once } = store.put(file('b.jpg')) as { id: string };
+    sent(registry.send({ agentId: MAIN, text: 'primeira', attachments: [once] }));
+    expect(() => registry.send({ agentId: MAIN, text: 'de novo', attachments: [once] })).toThrow(/expirou/);
+    expect(registry.size).toBe(1);
+  });
+
+  it('falha ao gravar: a mensagem falha com o motivo; sem depósito: anexos desligados', async () => {
+    const store = new AttachmentStore();
+    const { registry } = setup({ attachments: store, writeFiles: async () => { throw new Error('disco cheio'); } });
+    registry.inbox({ session: SESSION });
+    const { id: aid } = store.put(file('a.jpg')) as { id: string };
+    const id = sent(registry.send({ agentId: MAIN, text: 'oi', attachments: [aid] }));
+    await flush();
+    expect(registry.get(id)).toMatchObject({ status: 'failed', error: 'não deu para gravar os anexos (disco cheio)' });
+    const plain = setup();
+    plain.registry.inbox({ session: SESSION });
+    expect(plain.registry.send({ agentId: MAIN, text: 'oi', attachments: ['x'] })).toEqual({ error: 'unavailable', reason: 'anexos desligados' });
   });
 });
