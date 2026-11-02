@@ -29,6 +29,9 @@ do meio (0.**3**.0).
 
 ### Adicionado
 
+- **Barra de teclas no terminal do celular.** Com tela de toque, o terminal interativo ganha uma barra com Esc, Tab,
+  Ctrl (um toque arma; a próxima tecla vai com Ctrl, como Ctrl+C) e as setas, logo acima do teclado do iPhone, sem
+  fechá-lo a cada toque.
 - **Terminal interativo pelo iPhone, só pela tailnet.** Com `HABBLAUD_TAILNET_USER` (o login do Tailscale) e `pty` em
   `HABBLAUD_REMOTE_ALLOW`, o Habblaud abre uma terceira porta só em `127.0.0.1` (`HABBLAUD_TAILNET_PORT`, padrão
   4749), para o `tailscale serve --https=8443` publicar. Toda requisição nela precisa do usuário do Tailscale certo e

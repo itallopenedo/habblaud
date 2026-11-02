@@ -12,6 +12,7 @@ import { h, iconButton, setHidden, setText } from './dom';
 import { ICONS } from './icons';
 import { maximizeButton, Movable } from './movable';
 import { closePty, createPty, stopAgent, takeoverAgent } from './ptyapi';
+import { keyboardInset } from './ptykeys';
 import type { PtyPane } from './ptypane';
 import { askPassword, confirmedRecently, withReauth } from './reauth';
 import { TermActions } from './termactions';
@@ -98,6 +99,14 @@ export class PtyPanel implements UiComponent, PtyControl {
     this.el.addEventListener('keydown', (e) => e.stopPropagation());
     this.movable = new Movable(this.el, bar, { key: 'habblaud.move.term', enabled: () => !ctx.isNarrow(), onMove: () => this.pane?.refit(true) });
     this.el.addEventListener('keyup', (e) => e.stopPropagation());
+    // Celular: a janela termina em cima do teclado do iPhone (a barra de teclas fica logo acima dele).
+    const vv = typeof window === 'undefined' ? undefined : window.visualViewport;
+    const fitKeyboard = () => {
+      this.el.style.setProperty('--ui-pty-kb', `${keyboardInset(window.innerHeight, vv)}px`);
+      this.pane?.refit();
+    };
+    vv?.addEventListener('resize', fitKeyboard);
+    vv?.addEventListener('scroll', fitKeyboard);
   }
 
   get enabled(): boolean {
@@ -207,6 +216,7 @@ export class PtyPanel implements UiComponent, PtyControl {
     setHidden(this.away, !away);
     setHidden(this.screen, away);
     this.el.classList.toggle('is-away', away);
+    if (this.pane) setHidden(this.pane.keys.el, away);
   }
 
   private reveal(): void {
@@ -243,6 +253,7 @@ export class PtyPanel implements UiComponent, PtyControl {
         () => void this.reopen(),
       );
       this.screen.append(this.pane.el);
+      this.screen.after(this.pane.keys.el);
       return this.pane;
     });
     return this.loading;

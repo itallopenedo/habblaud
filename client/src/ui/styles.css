@@ -11272,3 +11272,49 @@ html.is-replay #world {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* Barra de teclas do terminal interativo (ui/ptykeys.ts): só com tela de toque. */
+.ui-pty__keys {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .ui-pty__keys {
+    display: flex;
+    flex: none;
+    gap: 6px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    overflow-x: auto;
+    background: #0a0c12;
+    border-top: 1px solid var(--ui-line);
+  }
+
+  .ui-pty__keys[hidden] {
+    display: none;
+  }
+}
+
+.ui-pty__key {
+  flex: none;
+  min-width: 44px;
+  min-height: 36px;
+  padding: 0 10px;
+  font: 600 13px/1 ui-monospace, Menlo, monospace;
+  color: var(--term-fg);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 6px;
+  touch-action: manipulation;
+}
+
+.ui-pty__key.is-on {
+  background: color-mix(in srgb, var(--st-working) 30%, transparent);
+  border-color: var(--st-working);
+}
+
+/* Celular com o teclado aberto: a janela termina em cima dele (--ui-pty-kb, ui/pty.ts). */
+@media (max-width: 600px) {
+  .ui-term.ui-pty {
+    bottom: var(--ui-pty-kb, 0px);
+  }
+}

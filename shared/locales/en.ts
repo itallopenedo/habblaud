@@ -3343,4 +3343,10 @@ export const EN: Readonly<Record<string, string>> = {
   "Para abrir o terminal pelo celular, digite de novo a senha do acesso remoto. Vale por 10 min.": "To open the terminal from your phone, type the remote access password again. It lasts 10 min.",
   "Terminal interativo só no próprio computador ou pela porta da tailnet": "Interactive terminal only on the computer itself or through the tailnet port",
   "sem conexão com o terminal": "no connection to the terminal",
+  "Ctrl: a próxima tecla vai com Ctrl": "Ctrl: the next key goes with Ctrl",
+  "Teclas do terminal": "Terminal keys",
+  "Seta para a esquerda": "Left arrow",
+  "Seta para cima": "Up arrow",
+  "Seta para baixo": "Down arrow",
+  "Seta para a direita": "Right arrow",
 };

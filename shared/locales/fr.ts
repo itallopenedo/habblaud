@@ -3360,4 +3360,10 @@ export const FR: Readonly<Record<string, string>> = {
   "Para abrir o terminal pelo celular, digite de novo a senha do acesso remoto. Vale por 10 min.": "Pour ouvrir le terminal depuis le téléphone, saisissez à nouveau le mot de passe de l'accès à distance. Valable 10 min.",
   "Terminal interativo só no próprio computador ou pela porta da tailnet": "Terminal interactif uniquement sur l'ordinateur lui-même ou via le port du tailnet",
   "sem conexão com o terminal": "pas de connexion au terminal",
+  "Ctrl: a próxima tecla vai com Ctrl": "Ctrl : la touche suivante part avec Ctrl",
+  "Teclas do terminal": "Touches du terminal",
+  "Seta para a esquerda": "Flèche gauche",
+  "Seta para cima": "Flèche haut",
+  "Seta para baixo": "Flèche bas",
+  "Seta para a direita": "Flèche droite",
 };

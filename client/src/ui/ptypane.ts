@@ -5,12 +5,15 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { postPty } from './ptyapi';
+import { PtyKeys } from './ptykeys';
 import { tr } from '../../../shared/i18n';
 
 const RESIZE_DEBOUNCE_MS = 120;
 
 export class PtyPane {
   readonly el: HTMLElement;
+  /** Barra de teclas do celular (Esc, Tab, Ctrl, setas); quem hospeda a coloca na janela. */
+  readonly keys: PtyKeys;
   private term: Terminal;
   private fit: FitAddon;
   private es: EventSource | null = null;
@@ -38,7 +41,12 @@ export class PtyPane {
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
     this.term.open(this.el);
-    this.term.onData((d) => this.send(d));
+    this.keys = new PtyKeys(
+      (d) => this.send(d),
+      () => this.term.modes.applicationCursorKeysMode,
+      () => this.term.focus(),
+    );
+    this.term.onData((d) => this.send(this.keys.apply(d)));
     this.term.onResize(({ cols, rows }) => this.scheduleResize(cols, rows));
     this.ro = new ResizeObserver(() => this.refit());
     this.ro.observe(this.el);
