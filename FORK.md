@@ -63,3 +63,24 @@ que vier do cliente), do login remoto (as mesmas sessões da 4748, com freio de 
 `pty` liberado; pedidos pelo Funnel (cabeçalho `Tailscale-Funnel-Request`) são recusados; as
 rotas só do computador (`/api/host/*`, hooks, World) seguem recusadas. Limite conhecido: um processo do próprio Mac
 consegue imitar o cabeçalho, mas ainda precisa do login, de `pty` e da senha recente, e esse processo já teria a 4747.
+
+## Hermes no escritório (Fase 6)
+
+O plugin `habblaud-observer` (`integrations/hermes/habblaud-observer/`) mostra no escritório o que o Hermes Agent da
+VPS está fazendo. Só observa: manda perfil, plataforma, um hash da sessão, o gancho, o nome da ferramenta, se deu
+certo, a duração, o horário e o modelo; nunca texto de mensagem, argumentos, resultados, comandos nem quem falou. O
+gancho só enfileira (o Hermes nunca espera o Habblaud) e um erro inesperado desliga o plugin até o próximo restart.
+
+No Mac, o `.env` tem só a hash do token (`HABBLAUD_HERMES_TOKEN_HASH=sha256:<64 hex>`); a rota
+`POST /api/hermes/events` existe só na porta da tailnet (4749, publicada na 8443), com o usuário do Tailscale e o
+token, sem o login remoto. Nas portas 4747 e 4748 ela não existe. Na VPS, por perfil (`HH=/root/.hermes` é o Íon; os
+outros ficam em `/root/.hermes/profiles/<nome>`):
+
+    $HH/plugins/habblaud-observer/{plugin.yaml,__init__.py}   # cópia de integrations/hermes/habblaud-observer/
+    $HH/habblaud-observer.json                                # {"url", "token", "profile"}, modo 600
+    $HH/config.yaml                                           # "- habblaud-observer" em plugins.enabled (backup antes)
+
+Depois, reiniciar o gateway do jeito que as notas do Hermes mandam (sem turno em andamento). Desligar: tirar a linha
+de `plugins.enabled` (o backup é `config.yaml.bak-habblaud-*`), reiniciar o gateway e apagar a pasta do plugin e o
+JSON. Testes do plugin: `python3 -m unittest discover -s integrations/hermes`. Agentes do Hermes nunca vão ao Habblaud
+World (a projeção só aceita Claude Code e Codex).
