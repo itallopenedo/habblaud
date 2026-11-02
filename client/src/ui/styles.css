@@ -5627,6 +5627,114 @@ button.ui-term__think:hover,
   color: var(--term-dim);
 }
 
+/* Modo chat: a mesma conversa em bolhas, com fonte de texto; ferramentas recolhidas em "Usou N ferramentas". */
+.ui-term.is-chat .ui-term__scroll {
+  font: 14px/1.55 var(--font-ui);
+}
+
+.ui-term.is-chat .ui-term__filter:not(.ui-term__view) {
+  display: none;
+}
+
+.ui-term.is-chat .ui-md__code,
+.ui-term.is-chat .ui-md__block,
+.ui-term.is-chat .ui-md__table {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.ui-term.is-chat .ui-term__row--user,
+.ui-term.is-chat .ui-term__row--assistant,
+.ui-term.is-chat .ui-term__row--system {
+  display: block;
+}
+
+.ui-term.is-chat .ui-term__row--user > .ui-term__mark,
+.ui-term.is-chat .ui-term__row--assistant > .ui-term__mark,
+.ui-term.is-chat .ui-term__row--system > .ui-term__mark {
+  display: none;
+}
+
+.ui-term.is-chat .ui-term__row--user {
+  align-self: flex-end;
+  max-width: min(85%, 640px);
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  border-radius: 16px 16px 4px 16px;
+  background: color-mix(in srgb, var(--ui-accent) 20%, rgba(255, 255, 255, 0.04));
+}
+
+/* Copiar a bolha: ao lado dela, sem cobrir o texto. */
+.ui-term.is-chat .ui-term__row--user > .ui-term__copy {
+  top: 50%;
+  right: calc(100% + 6px);
+  transform: translateY(-50%);
+}
+
+.ui-term.is-chat .ui-term__row--system {
+  align-self: center;
+  max-width: 90%;
+  font-size: 12px;
+  text-align: center;
+}
+
+.ui-term.is-chat .ui-term__row.is-folded {
+  display: none;
+}
+
+.ui-term.is-chat .ui-term__row.in-run {
+  margin-left: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--ui-line);
+  font: 12px/1.5 var(--font-mono);
+}
+
+.ui-chat__run {
+  display: none;
+}
+
+.ui-term.is-chat .ui-chat__run {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: 999px;
+  color: var(--term-dim);
+  font-size: 12px;
+}
+
+.ui-chat__run:hover {
+  color: var(--term-fg);
+}
+
+.ui-chat__run::after {
+  content: '›';
+  transition: transform 0.15s;
+}
+
+.ui-chat__run[aria-expanded='true']::after {
+  transform: rotate(90deg);
+}
+
+.ui-chat__run.is-running {
+  color: var(--term-fg);
+  animation: ui-chat-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ui-chat-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-chat__run.is-running {
+    animation: none;
+  }
+}
+
 /* Copiar: botão discreto no canto da entrada, que aparece no hover ou no foco e confirma com "Copiado". */
 .ui-term__row,
 .ui-term__call,

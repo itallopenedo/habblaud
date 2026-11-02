@@ -3381,4 +3381,13 @@ export const ES: Readonly<Record<string, string>> = {
   "{0} · responda no canal do Hermes": "{0} · responde en el canal de Hermes",
   "Responda no canal do Hermes{0}": "Responde en el canal de Hermes{0}",
   "Ver a atividade desta sessão, ao vivo (T)": "Ver la actividad de esta sesión, en vivo (T)",
+  // Modo chat do terminal
+  "Modo da conversa": "Vista de la conversación",
+  "Chat": "Chat",
+  "Conversa em bolhas, com as ferramentas recolhidas": "Conversación en burbujas, con las herramientas plegadas",
+  "Conversa no formato do Claude Code": "Conversación en el formato de Claude Code",
+  "Usando {0}…": "Usando {0}…",
+  "Pensou": "Pensó",
+  "Usou 1 ferramenta": "Usó 1 herramienta",
+  "Usou {0} ferramentas": "Usó {0} herramientas",
 };

@@ -43,6 +43,10 @@ do meio (0.**3**.0).
 
 ### Adicionado
 
+- **Modo chat no terminal.** Um botão "Chat | Terminal" no topo da janela troca o visual da conversa: no chat, seus
+  prompts viram bolhas, as respostas usam fonte de texto e as ferramentas entre duas mensagens ficam recolhidas em
+  "Usou N ferramentas" (um toque abre). A escolha fica salva no aparelho; sem escolha, o chat é o padrão na tela
+  estreita (celular) e o terminal, no computador.
 - **Pedidos e perguntas com botões dentro do terminal.** O cartão de aprovar ou responder (as opções do
   `AskUserQuestion`) aparece também no rodapé do terminal, como na gaveta: no celular, onde o terminal cobre a tela,
   dá para responder sem fechá-lo.
