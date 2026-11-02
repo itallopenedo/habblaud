@@ -30,6 +30,10 @@ export function keyboardInset(innerHeight: number, vv: { height: number; offsetT
   return vv ? Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop)) : 0;
 }
 
+/** Eventos cujo preventDefault mantém o foco no terminal. Nunca `touchstart`: no iOS/WebKit ele cancela o `click`
+ * sintetizado (as teclas ficariam mortas) e trava a rolagem horizontal da barra. */
+export const KEEP_FOCUS_EVENTS = ['pointerdown', 'mousedown'];
+
 /** Ctrl de um toque: arma, vale para a próxima tecla e desarma. */
 export class CtrlLatch {
   private armed = false;
@@ -100,7 +104,7 @@ export class PtyKeys {
   private button(label: string, aria: string, act: () => void): HTMLButtonElement {
     const b = h('button', { class: 'ui-pty__key', type: 'button', text: label, attrs: { 'aria-label': aria } });
     // Sem tirar o foco do terminal: o teclado do iPhone não fecha a cada toque.
-    for (const ev of ['pointerdown', 'mousedown', 'touchstart']) b.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+    for (const ev of KEEP_FOCUS_EVENTS) b.addEventListener(ev, (e) => e.preventDefault());
     b.addEventListener('click', () => {
       act();
       this.refocus();

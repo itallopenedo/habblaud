@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CtrlLatch, keyboardInset, keySequence, withCtrl } from './ptykeys';
+import { CtrlLatch, KEEP_FOCUS_EVENTS, keyboardInset, keySequence, withCtrl } from './ptykeys';
 
 describe('teclas do terminal no celular', () => {
   it('Esc, Tab e setas (normal e "application cursor")', () => {
@@ -43,5 +43,10 @@ describe('teclas do terminal no celular', () => {
     expect(l.take()).toBe(false);
     expect(l.toggle()).toBe(true);
     expect(l.toggle()).toBe(false);
+  });
+
+  it('não impede o touchstart (cancelaria o click no iPhone)', () => {
+    expect(KEEP_FOCUS_EVENTS).not.toContain('touchstart');
+    expect(KEEP_FOCUS_EVENTS).toEqual(['pointerdown', 'mousedown']);
   });
 });
