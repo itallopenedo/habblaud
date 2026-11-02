@@ -3367,4 +3367,10 @@ export const ES: Readonly<Record<string, string>> = {
   "Eventos do Hermes: falha ao aplicar um evento ({0}).": "Eventos de Hermes: error al aplicar un evento ({0}).",
   "Recebeu uma mensagem": "Recibió un mensaje",
   "Agente do Hermes": "Agente de Hermes",
+  "eventos do Hermes desligados: HABBLAUD_HERMES_TOKEN_HASH inválido (esperado sha256:<64 hex>)": "eventos de Hermes desactivados: HABBLAUD_HERMES_TOKEN_HASH no válido (se esperaba sha256:<64 hex>)",
+  "eventos do Hermes desligados: precisam da porta da tailnet (HABBLAUD_TAILNET_USER)": "eventos de Hermes desactivados: necesitan el puerto de la tailnet (HABBLAUD_TAILNET_USER)",
+  "evento do Hermes inválido ({0})": "evento de Hermes no válido ({0})",
+  "esperado {v: 1, events: [1 a {0} eventos do Hermes]}": "se esperaba {v: 1, events: [1 a {0} eventos de Hermes]}",
+  "muitos eventos do Hermes: tente de novo em instantes": "demasiados eventos de Hermes: inténtalo de nuevo en unos instantes",
+  "token do Hermes inválido": "token de Hermes no válido",
 };

@@ -841,6 +841,7 @@ describe('segredos fora do ambiente dos filhos', () => {
       HABBLAUD_REMOTE_PASSWORD_HASH: HASH_TEXT,
       HABBLAUD_REMOTE_INSECURE_HTTP: '1',
       HABBLAUD_TAILNET_USER: 'ana@example.com',
+      HABBLAUD_HERMES_TOKEN_HASH: `sha256:${'ab'.repeat(32)}`,
       HABBLAUD_REMOTE_ALLOW: 'pty',
       PATH: '/bin',
     };
@@ -848,7 +849,16 @@ describe('segredos fora do ambiente dos filhos', () => {
     scrubSecretsFromEnv(env);
     expect(config.remote?.user).toBe('ana');
     expect(config.tailnet?.user).toBe('ana@example.com');
+    expect(config.hermes?.tokenHash).toEqual(Buffer.from('ab'.repeat(32), 'hex'));
     expect(Object.keys(env).sort()).toEqual(['HABBLAUD_REMOTE_ALLOW', 'HABBLAUD_REMOTE_INSECURE_HTTP', 'HOME', 'PATH']);
+  });
+  it('eventos do Hermes: hash inválida ou sem a porta da tailnet ficam desligados, com o motivo', () => {
+    const base = { HOME: '/h', HABBLAUD_REMOTE_USER: 'ana', HABBLAUD_REMOTE_PASSWORD_HASH: HASH_TEXT, HABBLAUD_REMOTE_INSECURE_HTTP: '1' };
+    const ok = `sha256:${'ab'.repeat(32)}`;
+    expect(loadConfig(base, [])).toMatchObject({ hermes: undefined, hermesWarning: undefined });
+    expect(loadConfig({ ...base, HABBLAUD_TAILNET_USER: 'a@b', HABBLAUD_HERMES_TOKEN_HASH: 'abc' }, [])).toMatchObject({ hermes: undefined, hermesWarning: expect.stringMatching(/sha256/) });
+    expect(loadConfig({ ...base, HABBLAUD_HERMES_TOKEN_HASH: ok }, [])).toMatchObject({ hermes: undefined, hermesWarning: expect.stringMatching(/HABBLAUD_TAILNET_USER/) });
+    expect(loadConfig({ ...base, HABBLAUD_TAILNET_USER: 'a@b', HABBLAUD_HERMES_TOKEN_HASH: ok }, []).hermes).toBeDefined();
   });
 });
 
