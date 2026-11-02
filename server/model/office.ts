@@ -76,6 +76,8 @@ export interface OfficeDeps {
   messages?: () => ReadonlySet<string>;
   /** Verificação de versão nova no GitHub (ver OfficeSnapshot.meta.updates). */
   updates?: () => UpdateStatus;
+  /** Esforço de sessões do Claude Code que o Habblaud começou (SpawnService.effortOf): o transcript não grava. */
+  effortOf?: (sessionId: string) => string | undefined;
   /** Terminais interativos (PtyManager): estado do recurso e os abertos. */
   ptys?: () => { status: PtyStatus; list: PtyInfo[] };
   /** Habblaud World (WorldService.meta; ver OfficeSnapshot.meta.world). */
@@ -89,6 +91,8 @@ export interface TranscriptSummary {
   tasks: TaskItem[];
   stats: AgentStats;
   model?: string;
+  /** Esforço (Codex: do rollout). */
+  effort?: string;
   gitBranch?: string;
   permissionMode?: string;
   /** Primeiro evento conhecido (subagentes: o início real, depois de ler o começo do arquivo). */
@@ -298,9 +302,17 @@ export class Office {
 
   detail(id: string): AgentDetail | undefined {
     const rec = this.agents.get(id);
-    if (rec) return { agent: cloneAgent(rec.info), history: rec.history.slice() };
+    if (rec) return { agent: this.withEffort(cloneAgent(rec.info)), history: rec.history.slice() };
     const demo = this.demoSnap?.agents.find((a) => a.id === id);
     return demo ? { agent: cloneAgent(demo), history: demo.recent.slice() } : undefined;
+  }
+
+  /** Esforço de uma sessão do Claude Code que o Habblaud começou (o transcript não grava), na cópia do agente. */
+  private withEffort(a: AgentInfo): AgentInfo {
+    if (a.effort || a.kind !== 'main' || (a.provider ?? 'claude') !== 'claude') return a;
+    const effort = this.deps.effortOf?.(a.sessionId);
+    if (effort) a.effort = effort;
+    return a;
   }
 
   recentFeed(n: number): FeedItem[] {
@@ -672,6 +684,7 @@ export class Office {
     set('tasks', t.tasks.map((x) => ({ ...x })));
     set('stats', { ...t.stats });
     set('model', t.model);
+    set('effort', t.effort);
     set('gitBranch', t.gitBranch);
     set('permissionMode', t.permissionMode);
     if (info.kind === 'sub' && t.firstAt !== undefined && t.firstAt < info.startedAt) {
@@ -974,6 +987,7 @@ export class Office {
     const perms = this.deps.permissions?.();
     const real = [...this.agents.values()].map((r) => applyPermission(cloneAgent(r.info), perms?.get(r.info.id)));
     const reach = this.deps.messages?.();
+    for (const a of real) this.withEffort(a);
     // Mensagens pelo escritório: principais presentes cuja sessão está com o plugin conectado. No demo quem decide é
     // o simulador; com o recurso desligado, ninguém recebe.
     for (const a of real) if (reach?.has(a.id) && a.kind === 'main' && a.status !== 'offline' && a.status !== 'done') a.canMessage = true;

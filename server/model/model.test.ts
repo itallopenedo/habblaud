@@ -463,6 +463,16 @@ describe('Office', () => {
     expect(off.agents.map((a) => a.id)).toEqual(['acc:1']);
   });
 
+  it('esforço das sessões que o Habblaud começou vai para o agente principal do Claude', () => {
+    const deps = { names: new NameStore(null), version: 't', startedAt: 0, accounts: () => [], sources: () => [], accountName: () => undefined };
+    const office = new Office({ ...deps, effortOf: (sid) => (sid.startsWith('7eac') ? 'high' : undefined), now: () => 10 });
+    office.addMain({ id: 'acc:1', account: 'acc', sessionId: '7eacc670-x', cwd: '/p/a', role: 'x', startedAt: 1, status: 'working' });
+    office.addMain({ id: 'acc:2', account: 'acc', sessionId: '81fe-x', cwd: '/p/a', role: 'x', startedAt: 1, status: 'working' });
+    const agents = office.commit().snapshot.agents;
+    expect(agents.find((a) => a.id === 'acc:1')?.effort).toBe('high');
+    expect(agents.find((a) => a.id === 'acc:2')?.effort).toBeUndefined();
+  });
+
   it('meta.terminal: só com o terminal ligado', () => {
     expect(makeOffice().office.commit().snapshot.meta.terminal).toBe(false);
     const deps = { names: new NameStore(null), version: 't', startedAt: 0, accounts: () => [], sources: () => [], accountName: () => undefined };

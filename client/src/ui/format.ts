@@ -235,12 +235,29 @@ export function prettyModel(model: string | undefined): string {
 
 const PERMISSION_LABELS: Record<string, string> = {
   default: tr('Padrão (pergunta)'),
+  manual: tr('Pergunta sempre'),
   acceptEdits: tr('Aceita edições'),
   plan: tr('Modo plano'),
   bypassPermissions: tr('Sem confirmações'),
   dontAsk: tr('Não pergunta'),
   auto: tr('Automático'),
 };
+
+const EFFORT_LABELS: Record<string, string> = {
+  none: tr('nenhum'),
+  minimal: tr('mínimo'),
+  low: tr('baixo'),
+  medium: tr('médio'),
+  high: tr('alto'),
+  xhigh: tr('muito alto'),
+  max: tr('máximo'),
+  ultra: tr('ultra'),
+};
+
+/** Nível de esforço legível ("high" -> "alto"); nível desconhecido fica como veio. */
+export function effortLabel(effort: string): string {
+  return EFFORT_LABELS[effort] ?? effort;
+}
 
 export function permissionLabel(mode: string | undefined): string {
   if (!mode) return '—';

@@ -230,7 +230,14 @@ export async function spawnRound(
     if (!id) continue;
     const req = parseSpawn(raw);
     const files = checkFiles(rec(raw)?.files);
-    const bad = 'error' in req ? req.error : 'error' in files ? files.error : problem(req.folder);
+    const bad =
+      'error' in req
+        ? req.error
+        : 'error' in files
+          ? files.error
+          : req.choice || req.account
+            ? tr('modelo, esforço, permissão e conta só valem com o Habblaud rodando direto no computador (sem Docker)')
+            : problem(req.folder);
     if (bad || 'error' in req || 'error' in files) {
       results.push({ id, ok: false, error: bad ?? tr('pedido inválido') });
       log(tr('✗ agente novo recusado: {0}', [bad]));

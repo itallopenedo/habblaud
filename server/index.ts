@@ -3,7 +3,7 @@
 //   npm run dev    -> tsx server/index.ts --dev (Vite em middleware mode, HMR no mesmo servidor)
 //   npm start      -> node dist/server/index.js (serve dist/client)
 import http from 'node:http';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { codexDirsRefused, isDefaultDir } from './accounts/detect';
 import { AccountsService } from './accounts/service';
 import { isTruthy, loadConfig, messagesOffReason, scrubSecretsFromEnv, terminalOffReason, worldSocketUrl } from './config';
@@ -45,6 +45,7 @@ import { UpdateChecker } from './updates/checker';
 import { getLocale, tr } from '../shared/i18n';
 import type { WorldLocale } from '../shared/world/protocol';
 import { createCliRunner, createOpener, SpawnService } from './spawn/spawn';
+import { CLAUDE_MODELS, CLAUDE_PERMISSIONS, CODEX_PERMISSIONS, createCodexCatalog } from './spawn/options';
 import { runnableClaudeBin } from './claude-bin';
 import { AttachmentStore, attachmentsRoot, startAttachmentsCleanup, writeMessageAttachments } from './spawn/attachments';
 import { HostFileWriter } from './spawn/host-writer';
@@ -87,7 +88,7 @@ const roomAliases = new RoomAliases(join(config.dataDir, 'rooms.json'));
 roomAliases.load();
 
 // Office, contas e fontes de agentes se referenciam (avisos de mudança / fontes): ligação tardia.
-const late: { office?: Office; agents?: SourceSet; permissions?: PermissionRegistry; messages?: MessageRegistry; ptys?: PtyManager; ptyOff?: string } = {};
+const late: { office?: Office; agents?: SourceSet; permissions?: PermissionRegistry; messages?: MessageRegistry; ptys?: PtyManager; ptyOff?: string; spawn?: SpawnService } = {};
 // Versão nova: consulta a release mais recente no GitHub a cada 6 h (HABBLAUD_UPDATE_CHECK=0 desliga).
 const updates = new UpdateChecker({
   current: config.version,
@@ -135,6 +136,7 @@ const office = new Office({
   permissions: () => late.permissions?.snapshot() ?? new Map(),
   messages: config.messages ? () => late.messages?.reachable() ?? new Set() : undefined,
   ptys: () => (late.ptys ? { status: late.ptys.status(), list: late.ptys.list() } : { status: { enabled: false, reason: late.ptyOff ?? tr('desligado') }, list: [] }),
+  effortOf: (sessionId) => late.spawn?.effortOf(sessionId),
   updates: () => updates.status(),
   world: () => world?.meta() ?? { enabled: false, configured: false, state: 'off' },
 });
@@ -285,9 +287,21 @@ const spawnOn = config.messages && ptyOptIn;
 // Anexos: das mensagens (trava das mensagens) e do Novo agente; um depósito só.
 const attachments = config.messages ? new AttachmentStore() : undefined;
 const spawnBin = config.inDocker ? undefined : runnableClaudeBin(process.env);
+const claudeAccountDir = (id: string) => {
+  const a = accounts.entries().find((e) => e.id === id);
+  return a && { dir: a.dir, isDefault: isDefaultDir(a.dir, config.home) };
+};
 const spawn = spawnOn
-  ? new SpawnService(config.inDocker ? { attachments } : { opener: createOpener(), cli: spawnBin ? createCliRunner(spawnBin) : undefined, attachments })
+  ? new SpawnService(
+      config.inDocker ? { attachments } : { opener: createOpener(), cli: spawnBin ? createCliRunner(spawnBin) : undefined, attachments, accountDir: claudeAccountDir },
+    )
   : undefined;
+late.spawn = spawn;
+// Codex no terminal interativo (Novo agente): o binário e o catálogo de modelos (codex debug models).
+const codexPtyBin = config.inDocker ? undefined : (codexBin ?? findCodexBin(process.env));
+const codexCatalog = codexPtyBin ? createCodexCatalog(codexPtyBin) : undefined;
+const codexAccounts = () =>
+  accounts.entriesOf('codex').map((a) => ({ id: a.id, dir: a.dir, isDefault: resolve(a.dir) === resolve(config.home, '.codex') }));
 // Ditado: no Docker quem transcreve é o auxiliar do host; no Node, o servidor, se achar o Whisper local.
 const whisper = config.messages && !config.inDocker ? findWhisper() : undefined;
 const dictation = config.messages
@@ -341,6 +355,16 @@ const ptys = spawnPty
       spawn: spawnPty,
       claudeBin: claudeBin ?? 'claude',
       accounts: () => accounts.entries().map((a) => ({ id: a.id, dir: a.dir, isDefault: isDefaultDir(a.dir, config.home) })),
+      codexBin: codexPtyBin,
+      codexAccounts,
+      codexAgents: ({ cwd, account, since }) =>
+        office
+          .list()
+          .filter((a) => {
+            const path = a.provider === 'codex' && a.kind === 'main' && a.account === account && a.startedAt >= since ? office.roomPath(a.roomId) : undefined;
+            return !!path && resolve(path) === cwd;
+          })
+          .map((a) => a.id),
       agent: (id) => {
         const a = office.get(id);
         return a && { id: a.id, kind: a.kind, account: a.account, sessionId: a.sessionId, cwd: office.roomPath(a.roomId) };
@@ -402,9 +426,36 @@ const api = createApiHandler({
   permissions: permissions ? createPermissionRoutes(permissions) : undefined,
   messages: messages ? createMessageRoutes(messages) : undefined,
   pty: ptys
-    ? createPtyRoutes(ptys, { tailnet: isTailnetRequest, claim: (req, id) => void remoteSessions?.claim(readCookie(req.headers.cookie, COOKIE), id) })
+    ? createPtyRoutes(ptys, {
+        tailnet: isTailnetRequest,
+        claim: (req, id) => void remoteSessions?.claim(readCookie(req.headers.cookie, COOKIE), id),
+        codexModels: () => codexCatalog?.() ?? Promise.resolve([]),
+      })
     : undefined,
   spawn,
+  spawnOptions: spawn
+    ? async () => {
+        const named = (list: { id: string; isDefault: boolean }[]) =>
+          list.map((a) => ({ id: a.id, name: accounts.find(a.id)?.detected.name ?? a.id, isDefault: a.isDefault }));
+        const codexOn = !!ptys && !!codexPtyBin;
+        return {
+          claude: {
+            available: !config.inDocker,
+            ...(config.inDocker ? { reason: tr('modelo e esforço só com o Habblaud rodando direto no computador (sem Docker)') } : {}),
+            accounts: named(accounts.entries().map((a) => ({ id: a.id, isDefault: isDefaultDir(a.dir, config.home) }))),
+            models: CLAUDE_MODELS,
+            permissions: CLAUDE_PERMISSIONS,
+          },
+          codex: {
+            available: codexOn,
+            ...(codexOn ? {} : { reason: !ptys ? tr('o terminal interativo está desligado ({0})', [ptyOff ?? tr('desligado')]) : tr('o Codex não está instalado neste computador') }),
+            accounts: codexOn ? named(codexAccounts()) : [],
+            models: codexOn && codexCatalog ? await codexCatalog() : [],
+            permissions: Object.keys(CODEX_PERMISSIONS),
+          },
+        };
+      }
+    : undefined,
   attachments,
   attachmentWriter,
   dictation,

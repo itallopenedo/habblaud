@@ -279,6 +279,12 @@ Install a certificate › CA certificate), checking the fingerprint the setup sh
   there. **It comes turned off:** it needs `HABBLAUD_PTY=1` (the same opt-in as the
   [interactive terminal](#interactive-terminal-take-over-new-session-and-end); in Docker, put it in `.env` and keep
   `npm run codex:bridge` running on the computer) and, from the phone, `spawn` in `HABBLAUD_REMOTE_ALLOW` too.
+  Outside Docker, the sheet also picks **Claude or Codex**, the account (the default one first), the model (by its
+  full name), the effort (only the levels that model accepts) and the permission mode. Claude goes through
+  `claude --bg --model --effort --permission-mode`; Codex opens in an interactive terminal here (`codex -C <folder>`
+  with `-m`, `-c model_reasoning_effort=...`, `-s` and `-a`; models come from `codex debug models`), so it needs the
+  interactive terminal on and, from the phone, `pty` in `HABBLAUD_REMOTE_ALLOW`. The modes that drop every guard
+  (`bypassPermissions`, `danger-full-access`) are not offered: keep "Default" if your CLI config already uses them.
 - **Dictation** (in New agent and in the message box): needs `whisper-cli` and `ffmpeg` (`brew install whisper-cpp
   ffmpeg`) and a multilingual model in `~/.local/share/whisper/` (`ggml-small.bin` gets more right than
   `ggml-base.bin`; the `.en` ones only understand English). Without them, the Dictate button doesn't show up. The

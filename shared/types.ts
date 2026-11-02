@@ -163,6 +163,8 @@ export interface AgentInfo {
   /** Shells rodando que o agente espera: em segundo plano e o comando em primeiro plano ainda sem resultado. */
   shells?: ShellJob[];
   model?: string;
+  /** Nível de esforço (Codex: do rollout; Claude: só das sessões que o Habblaud começou). */
+  effort?: string;
   gitBranch?: string;
   permissionMode?: string;
   startedAt: number;
@@ -762,7 +764,10 @@ export interface PtyInfo {
   pid: number;
   cwd: string;
   account: string;
+  /** Agente do escritório deste terminal. Codex: vazio até a sessão aparecer no escritório. */
   agentId: string;
+  /** Codex interativo (ausente = Claude Code). */
+  agent?: 'codex';
   /** Sessão retomada (`claude --resume`), quando o terminal assumiu uma sessão que já existia. */
   resumed?: string;
   /** Agente que este terminal assumiu (o id antigo, do processo encerrado). */
@@ -770,6 +775,38 @@ export interface PtyInfo {
   startedAt: number;
   exitedAt?: number;
   exitCode?: number;
+}
+
+/** Modelo que a folha do Novo agente oferece (GET /api/spawn/options). */
+export interface LaunchModel {
+  id: string;
+  name: string;
+  /** Níveis de esforço que o modelo aceita, do menor para o maior. */
+  efforts: string[];
+  defaultEffort?: string;
+}
+
+export interface LaunchAccount {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+/** O que dá para escolher ao começar um agente de uma ferramenta. */
+export interface LaunchAgentOptions {
+  available: boolean;
+  /** Por que não dá (available false). */
+  reason?: string;
+  accounts: LaunchAccount[];
+  models: LaunchModel[];
+  /** Modos de permissão aceitos (ids; a página traduz). */
+  permissions: string[];
+}
+
+/** GET /api/spawn/options: Claude Code (`claude --bg`) e Codex (terminal interativo). */
+export interface SpawnOptions {
+  claude: LaunchAgentOptions;
+  codex: LaunchAgentOptions;
 }
 
 /** Mensagem entregue ao plugin habblaud-mensagens (POST /api/mod/inbox). */

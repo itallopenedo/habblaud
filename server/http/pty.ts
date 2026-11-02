@@ -1,6 +1,7 @@
 // Rotas do terminal interativo (PtyManager, server/pty/manager.ts):
 //   GET  /api/pty                      estado do recurso e terminais abertos
 //   POST /api/pty                      {cwd, account?, cols?, rows?}: sessão nova do Claude Code
+//                                      {agent: "codex", cwd, account?, model?, effort?, permission?, prompt?}: do Codex
 //   GET  /api/pty/:id/stream           SSE: reset (tela guardada) | data | exit
 //   POST /api/pty/:id/input|resize|close
 //   POST /api/agents/:id/stop          encerra o agente (aqui ou noutro terminal)
@@ -9,9 +10,11 @@
 // também conecta pelo loopback), com Host local — ou o nome da tailnet, na porta da tailnet — e (quando o navegador
 // manda) Origin da mesma origem. A borda (http/guard.ts) já exige JSON nos POST.
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { PtyError, type PtyManager } from '../pty/manager';
+import { PtyError, type CodexLaunch, type PtyManager } from '../pty/manager';
 import { HttpError, ptyRequestProblem, readJson, sendJson } from './app';
 import { tr } from '../../shared/i18n';
+import { parseChoice, type ModelOption } from '../spawn/options';
+import { PROMPT_MAX } from '../spawn/spawn';
 
 /** /api/agents/:id/(stop|takeover) (ids nunca contêm '/'). */
 const AGENT_ACTION_ROUTE = /^\/api\/agents\/([^/]+)\/(stop|takeover)$/;
@@ -22,7 +25,12 @@ const AGENT_ACTION_ROUTE = /^\/api\/agents\/([^/]+)\/(stop|takeover)$/;
  */
 export function createPtyRoutes(
   ptys: PtyManager,
-  opts: { tailnet?: (req: IncomingMessage) => boolean; claim?: (req: IncomingMessage, ptyId: string) => void } = {},
+  opts: {
+    tailnet?: (req: IncomingMessage) => boolean;
+    claim?: (req: IncomingMessage, ptyId: string) => void;
+    /** Catálogo de modelos do Codex (spawn/options.ts), para conferir o pedido de uma sessão nova do Codex. */
+    codexModels?: () => Promise<ModelOption[]>;
+  } = {},
 ): (req: IncomingMessage, res: ServerResponse, path: string) => void {
   const fail = (res: ServerResponse, err: unknown) => {
     if (res.headersSent) return void res.destroy();
@@ -77,7 +85,15 @@ export function createPtyRoutes(
       if (method === 'GET') return sendJson(res, 200, { status: ptys.status(), ptys: ptys.list() });
       if (method !== 'POST') return notAllowed(res, 'GET, POST');
       const body = (await readJson(req)) as Record<string, unknown>;
-      const info = ptys.create({ cwd: body?.cwd, account: body?.account, cols: body?.cols, rows: body?.rows });
+      let codex: CodexLaunch | undefined;
+      if (body?.agent === 'codex') {
+        const choice = parseChoice('codex', body, opts.codexModels ? await opts.codexModels() : []);
+        if ('error' in choice) throw new HttpError(400, choice.error);
+        const prompt = body.prompt === undefined ? '' : body.prompt;
+        if (typeof prompt !== 'string' || prompt.length > PROMPT_MAX || prompt.includes('\0')) throw new HttpError(400, tr('o pedido passa de {0} caracteres', [PROMPT_MAX]));
+        codex = { choice, ...(prompt.trim() ? { prompt: prompt.replace(/\s+$/, '') } : {}) };
+      } else if (body?.agent !== undefined && body.agent !== 'claude') throw new HttpError(400, tr('agente desconhecido'));
+      const info = ptys.create({ cwd: body?.cwd, account: body?.account, cols: body?.cols, rows: body?.rows, ...(codex ? { codex } : {}) });
       claim(info.id);
       return sendJson(res, 201, info);
     }

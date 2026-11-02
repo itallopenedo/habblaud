@@ -7911,6 +7911,43 @@ html.is-replay #world {
   justify-content: center;
 }
 
+/* Agente, conta, modelo, esforço e permissões: duas colunas no computador, uma no celular. */
+.ui-spawn__agent .ui-seg__opt {
+  height: 30px;
+}
+
+.ui-spawn__agent .ui-seg__opt:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-spawn__opts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 8px;
+}
+
+.ui-spawn__field[hidden] {
+  display: none;
+}
+
+.ui-spawn__select {
+  height: 32px;
+  padding-block: 0;
+}
+
+@media (max-width: 520px) {
+  .ui-spawn__opts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ui-spawn__agent .ui-seg__opt,
+  .ui-spawn__select {
+    height: 40px;
+    font-size: 16px; /* 16 px: o Safari do iPhone não dá zoom ao tocar */
+  }
+}
+
 .ui-spawn__folders {
   display: flex;
   flex-direction: column;

@@ -167,7 +167,7 @@ describe('novo agente em segundo plano (claude --bg)', () => {
     const bin = join(dir, 'claude');
     writeFileSync(
       bin,
-      `#!/bin/sh\nprintf '%s\\n' "$PWD" "$@" > "${dir}/args"\n[ -f ./trusted ] || { echo 'Workspace not trusted. Run claude once' >&2; exit 1; }\necho 'Starting background service…'\necho 'backgrounded · 7eacc670 · nome'\n`,
+      `#!/bin/sh\nprintf '%s\\n' "$PWD" "$@" > "${dir}/args"\n[ -f ./trusted ] || { echo 'Workspace not trusted. Run claude once' >&2; exit 1; }\necho 'Starting background service…'\nprintf 'backgrounded \\302\\267 \\033[36m7eacc670\\033[39m \\302\\267 nome\\n'\n`,
     );
     chmodSync(bin, 0o755);
     writeFileSync(join(dir, 'trusted'), '');
@@ -184,7 +184,7 @@ describe('novo agente em segundo plano (claude --bg)', () => {
   it('launch: roda em segundo plano; se não der, abre o app e diz por quê', async () => {
     const opened: string[] = [];
     const open: Opener = async (url) => (opened.push(url), { ok: true });
-    expect(await launch({ folder: '/p', prompt: 'oi' }, open, async () => ({ ok: true, id: 'a' }))).toEqual({ ok: true, how: 'cli' });
+    expect(await launch({ folder: '/p', prompt: 'oi' }, open, async () => ({ ok: true, id: 'a' }))).toEqual({ ok: true, how: 'cli', session: 'a' });
     expect(opened).toEqual([]);
     const r = await launch({ folder: '/p', prompt: 'oi' }, open, async () => ({ ok: false, error: 'Workspace not trusted. Run `claude` in /p once' }));
     expect(r).toMatchObject({ ok: true, how: 'app', note: expect.stringMatching(/ainda não é confiável/) });
@@ -200,7 +200,7 @@ describe('novo agente em segundo plano (claude --bg)', () => {
     const s = new SpawnService({ opener: async () => ({ ok: true }), cli: async () => ({ ok: true, id: 'x' }), folderProblem: () => undefined, newId: () => 'c1' });
     s.submit({ folder: '/p', prompt: 'oi' });
     await new Promise((ok) => setTimeout(ok, 0));
-    expect(s.get('c1')).toEqual({ id: 'c1', folder: '/p', status: 'opened', how: 'cli' });
+    expect(s.get('c1')).toEqual({ id: 'c1', folder: '/p', status: 'opened', how: 'cli', session: 'x' });
     let n = 0;
     const d = new SpawnService({ newId: () => `d${++n}` });
     d.poll();
@@ -212,5 +212,66 @@ describe('novo agente em segundo plano (claude --bg)', () => {
     expect(d.get('d1')).toMatchObject({ status: 'opened', how: 'cli' });
     expect(d.get('d2')).toMatchObject({ status: 'opened', how: 'app', note: 'pasta nova' });
     expect(d.get('d3')).toMatchObject({ status: 'opened', how: 'app' });
+  });
+});
+
+describe('novo agente: modelo, esforço, permissão e conta', () => {
+  it('parseSpawn aceita só valores da lista do Claude', () => {
+    expect(parseSpawn({ folder: '/p', model: 'claude-opus-5-5', effort: 'high', permission: 'plan', account: '.claude-b' })).toEqual({
+      folder: '/p',
+      prompt: '',
+      choice: { model: 'claude-opus-5-5', effort: 'high', permission: 'plan' },
+      account: '.claude-b',
+    });
+    expect(parseSpawn({ folder: '/p', model: '', effort: '' })).toEqual({ folder: '/p', prompt: '' });
+    expect(parseSpawn({ folder: '/p', model: 'opus; rm -rf' })).toHaveProperty('error');
+    expect(parseSpawn({ folder: '/p', effort: 'ultra' })).toHaveProperty('error');
+    expect(parseSpawn({ folder: '/p', permission: 'bypassPermissions' })).toHaveProperty('error');
+    expect(parseSpawn({ folder: '/p', model: 3 })).toHaveProperty('error');
+    expect(parseSpawn({ folder: '/p', account: 3 })).toHaveProperty('error');
+  });
+
+  it('cliArgs: as opções vêm antes do `--`', () => {
+    expect(cliArgs({ folder: '/p', prompt: 'oi', choice: { model: 'claude-opus-5-5', effort: 'max', permission: 'acceptEdits' } })).toEqual([
+      '--bg',
+      '-n',
+      'Habblaud: oi',
+      '--model',
+      'claude-opus-5-5',
+      '--effort',
+      'max',
+      '--permission-mode',
+      'acceptEdits',
+      '--',
+      'oi',
+    ]);
+  });
+
+  it('SpawnService: conta vira a pasta da conta, esforço fica lembrado pelo id da sessão, Docker recusa as opções', async () => {
+    const seen: Array<{ configDir?: string; choice?: unknown }> = [];
+    const s = new SpawnService({
+      opener: async () => ({ ok: true }),
+      cli: async (req) => (seen.push({ configDir: req.configDir, choice: req.choice }), { ok: true, id: '7eacc670' }),
+      folderProblem: () => undefined,
+      accountDir: (id) => (id === '.claude-b' ? { dir: '/h/.claude-b', isDefault: false } : id === '.claude' ? { dir: '/h/.claude', isDefault: true } : undefined),
+      newId: () => 'e1',
+    });
+    expect(s.submit({ folder: '/p', account: '.nada' })).toMatchObject({ error: 'invalid', reason: 'conta desconhecida' });
+    s.submit({ folder: '/p', account: '.claude-b', effort: 'high' });
+    await new Promise((ok) => setTimeout(ok, 0));
+    expect(seen).toEqual([{ configDir: '/h/.claude-b', choice: { effort: 'high' } }]);
+    expect(s.get('e1')).toMatchObject({ status: 'opened', how: 'cli', session: '7eacc670' });
+    expect(s.effortOf('7eacc670-2349-4afc-8552-efb9063fb4b9')).toBe('high');
+    expect(s.effortOf('81fee463-2349-4afc-8552-efb9063fb4b9')).toBeUndefined();
+    const host = new SpawnService({});
+    host.poll();
+    expect(host.submit({ folder: '/p', model: 'claude-opus-5-5' })).toMatchObject({ error: 'invalid' });
+  });
+
+  it('o app (pasta não confiável) avisa que abre sem as escolhas', async () => {
+    const r = await launch({ folder: '/p', prompt: '', choice: { model: 'claude-opus-5-5' } }, async () => ({ ok: true }), async () => ({ ok: false, error: 'sem login' }));
+    expect(r).toEqual({ ok: true, how: 'app', note: 'sem login; o app abre com o modelo, o esforço e a permissão padrão' });
+    // Outra conta: o app abriria na conta padrão, então fica o erro.
+    expect(await launch({ folder: '/p', prompt: '', configDir: '/h/.claude-b' }, async () => ({ ok: true }), async () => ({ ok: false, error: 'sem login' }))).toEqual({ ok: false, error: 'sem login' });
   });
 });

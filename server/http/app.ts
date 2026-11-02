@@ -1,7 +1,7 @@
 // Rotas da API (/api/*). Respostas JSON; rotas desconhecidas -> 404 JSON.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { NAME_MAX, parseAppearanceParts, parseCharacterName, parseSeed } from '../../shared/appearance';
-import type { AccessInfo, AgentInfo, ModSummary, OfficeSnapshot, SourceInfo, UpdateStatus } from '../../shared/types';
+import type { AccessInfo, AgentInfo, ModSummary, OfficeSnapshot, SourceInfo, SpawnOptions, UpdateStatus } from '../../shared/types';
 import type { AccountsService } from '../accounts/service';
 import { handleCodexEvent } from '../codex/http';
 import type { DayStatsService } from '../history/daystats';
@@ -71,6 +71,8 @@ export interface ApiDeps {
   spawn?: SpawnService;
   /** Pastas sugeridas no "Novo agente" (GET /api/spawn/folders; spawn/folders.ts): projetos recentes. */
   spawnFolders?: () => Promise<SpawnFolder[]>;
+  /** Modelos, esforços, permissões e contas do "Novo agente" (GET /api/spawn/options; spawn/options.ts). */
+  spawnOptions?: () => Promise<SpawnOptions>;
   /** Anexos do "Novo agente" (POST /api/spawn/attachments) e das mensagens (POST /api/attachments); spawn/attachments.ts. */
   attachments?: AttachmentStore;
   /** Anexos das mensagens no Docker: o auxiliar do host grava (/api/host/attachments/*; spawn/host-writer.ts). */
@@ -605,6 +607,10 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       else if (path === '/api/spawn/folders') {
         if (!isRead) methodNotAllowed(res, 'GET');
         else (deps.spawnFolders ?? (async () => []))().then((folders) => sendJson(res, 200, { folders }), (err) => fail(res, err));
+      } else if (path === '/api/spawn/options') {
+        if (!isRead) methodNotAllowed(res, 'GET');
+        else if (!deps.spawnOptions) sendJson(res, 404, { error: tr('opções desligadas') });
+        else deps.spawnOptions().then((o) => sendJson(res, 200, o), (err) => fail(res, err));
       } else if (path === '/api/spawn/attachments') {
         const store = deps.attachments;
         if (method !== 'POST') methodNotAllowed(res, 'POST');

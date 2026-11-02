@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ago, formatBytes, shortPath, spawnFolders } from './spawn';
+import { ago, effortsFor, formatBytes, launchPermissionLabel, shortPath, spawnFolders, submitLabel, validChoice } from './spawn';
 import { insertDictation, pickMimeType } from './dictation';
 
 describe('spawnFolders', () => {
@@ -48,3 +48,37 @@ describe('ditado no campo', () => {
     expect(pickMimeType(() => { throw new Error('x'); })).toBeUndefined();
   });
 });
+
+describe('opções do Novo agente', () => {
+  const opts = {
+    available: true,
+    accounts: [
+      { id: '.codex', name: 'Conta A', isDefault: true },
+      { id: '.codex-b', name: 'Conta B', isDefault: false },
+    ],
+    models: [
+      { id: 'gpt-x-sol', name: 'Sol', efforts: ['low', 'medium', 'ultra'], defaultEffort: 'medium' },
+      { id: 'gpt-x-luna', name: 'Luna', efforts: ['low', 'max'] },
+    ],
+    permissions: ['read-only', 'workspace-write'],
+  };
+
+  it('esforços do modelo; sem modelo, a união na ordem', () => {
+    expect(effortsFor(opts, 'gpt-x-luna')).toEqual(['low', 'max']);
+    expect(effortsFor(opts, '')).toEqual(['low', 'medium', 'ultra', 'max']);
+  });
+
+  it('a escolha guardada perde o que a lista não aceita mais', () => {
+    expect(validChoice(opts, { account: '.codex-b', model: 'gpt-x-luna', effort: 'max', permission: 'read-only' })).toEqual({ account: '.codex-b', model: 'gpt-x-luna', effort: 'max', permission: 'read-only' });
+    expect(validChoice(opts, { account: '.sumiu', model: 'gpt-x-luna', effort: 'ultra', permission: 'danger' })).toEqual({ account: '', model: 'gpt-x-luna', effort: '', permission: '' });
+    expect(validChoice(opts, {})).toEqual({ account: '', model: '', effort: '', permission: '' });
+  });
+
+  it('rótulos do botão e das permissões', () => {
+    expect(submitLabel({ account: '', model: 'claude-opus-5-5', effort: 'high', permission: '' })).toBe('Começar · claude-opus-5-5 · alto');
+    expect(submitLabel({ account: '', model: '', effort: '', permission: '' })).toBe('Começar');
+    expect(launchPermissionLabel('codex', 'read-only')).toBe('Só leitura');
+    expect(launchPermissionLabel('claude', 'plan')).toBe('Modo plano');
+  });
+});
+

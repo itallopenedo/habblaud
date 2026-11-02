@@ -8,6 +8,8 @@
 // - modo Node: o próprio servidor;
 // - Docker: o auxiliar do host (scripts/codex-bridge.ts, npm run codex:bridge) busca os pedidos em
 //   POST /api/host/spawn/poll, confere a pasta, roda e confirma em POST /api/host/spawn/ack.
+// Modelo, esforço, modo de permissão e conta (spawn/options.ts) só no modo Node: viram --model, --effort,
+// --permission-mode e CLAUDE_CONFIG_DIR do `claude --bg`; o link do app não leva nenhum deles.
 // Anexos (spawn/attachments.ts): quem roda grava os arquivos em ~/.habblaud/attachments/ e põe os caminhos no fim
 // do pedido. Sem shell (execFile), com prazo, e o pedido vai depois de `--` (nunca vira opção nem subcomando).
 // Node puro e sem dependências: também é importado pelo auxiliar do host (via tsx).
@@ -17,6 +19,7 @@ import { statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { tr } from '../../shared/i18n';
 import { attachmentsRoot, promptWithAttachments, writeAttachments, type Attachment, type AttachmentStore } from './attachments';
+import { CLAUDE_MODELS, parseChoice, type LaunchChoice } from './options';
 
 /** Tamanho máximo do pedido (o link inteiro vai pela linha de comando do `open`). */
 export const PROMPT_MAX = 8_000;
@@ -39,10 +42,19 @@ export const QUEUED_TIMEOUT_MS = 30_000;
 export const KEEP_MS = 10 * 60_000;
 const MAX_OPEN = 5;
 const ERROR_MAX = 300;
+const ANSI = /\x1b\[[0-9;]*m/g;
+/** Esforço das sessões que o Habblaud começou, lembrado para o cartão do agente (o transcript não grava). */
+const EFFORTS_MAX = 200;
 
 export interface SpawnRequest {
   folder: string;
   prompt: string;
+  /** Modelo, esforço e modo de permissão (ausente = padrão do CLI). */
+  choice?: LaunchChoice;
+  /** Conta pedida (AccountInfo.id); ausente = a padrão. */
+  account?: string;
+  /** Pasta da conta, quando não é a padrão (vira CLAUDE_CONFIG_DIR). */
+  configDir?: string;
 }
 
 export type SpawnStatus = 'queued' | 'sent' | 'opened' | 'failed';
@@ -58,6 +70,8 @@ export interface SpawnInfo {
   how?: SpawnHow;
   /** Com how `app` depois de tentar o `claude --bg`: por que não rodou sozinho. */
   note?: string;
+  /** Com how `cli`: o id curto que o `claude --bg` devolve (o começo do id da sessão). */
+  session?: string;
 }
 
 export type OpenResult = { ok: true } | { ok: false; error: string };
@@ -65,7 +79,7 @@ export type Opener = (url: string) => Promise<OpenResult>;
 export type CliResult = { ok: true; id: string } | { ok: false; error: string };
 /** Roda o pedido como sessão em segundo plano do Claude Code. */
 export type CliRunner = (req: SpawnRequest) => Promise<CliResult>;
-export type LaunchResult = { ok: true; how: SpawnHow; note?: string } | { ok: false; error: string };
+export type LaunchResult = { ok: true; how: SpawnHow; note?: string; session?: string } | { ok: false; error: string };
 
 /** Confere o corpo de POST /api/spawn; devolve o pedido ou o motivo da recusa. */
 export function parseSpawn(raw: unknown): SpawnRequest | { error: string } {
@@ -76,7 +90,11 @@ export function parseSpawn(raw: unknown): SpawnRequest | { error: string } {
     return { error: tr('escolha uma pasta (caminho absoluto, ex.: /Users/voce/projeto)') };
   }
   if (prompt.length > PROMPT_MAX || prompt.includes('\0')) return { error: tr('o pedido passa de {0} caracteres', [PROMPT_MAX]) };
-  return { folder, prompt };
+  const choice = parseChoice('claude', r, CLAUDE_MODELS);
+  if ('error' in choice) return choice;
+  if (r.account !== undefined && typeof r.account !== 'string') return { error: tr('conta desconhecida') };
+  const account = typeof r.account === 'string' && r.account ? r.account : undefined;
+  return { folder, prompt, ...(Object.keys(choice).length ? { choice } : {}), ...(account ? { account } : {}) };
 }
 
 /** O link que o app do Claude entende (claude://code/new; `q` = pedido já escrito). */
@@ -98,6 +116,10 @@ export function sessionName(prompt: string): string {
 /** Argumentos do `claude`: o pedido depois de `--` (um pedido "doctor" ou "-x" continua sendo pedido). */
 export function cliArgs(req: SpawnRequest): string[] {
   const args = ['--bg', '-n', sessionName(req.prompt)];
+  const c = req.choice ?? {};
+  if (c.model) args.push('--model', c.model);
+  if (c.effort) args.push('--effort', c.effort);
+  if (c.permission) args.push('--permission-mode', c.permission);
   return req.prompt.trim() ? [...args, '--', req.prompt] : args;
 }
 
@@ -105,9 +127,13 @@ export function cliArgs(req: SpawnRequest): string[] {
 export function createCliRunner(bin: string, timeoutMs = CLI_TIMEOUT_MS): CliRunner {
   return (req) =>
     new Promise((ok) => {
-      const child = execFile(bin, cliArgs(req), { cwd: req.folder, timeout: timeoutMs, windowsHide: true, encoding: 'utf8' }, (err, out, stderr) => {
-        const id = /backgrounded\s*·\s*([\w-]+)/.exec(out ?? '')?.[1];
-        if (!err && id) return ok({ ok: true, id });
+      const env = req.configDir ? { ...process.env, CLAUDE_CONFIG_DIR: req.configDir } : process.env;
+      const child = execFile(bin, cliArgs(req), { cwd: req.folder, env, timeout: timeoutMs, windowsHide: true, encoding: 'utf8' }, (err, out, stderr) => {
+        // Com o id impresso a sessão existe, mesmo que o comando saia com erro depois (ex.: subindo o serviço de
+        // segundo plano na primeira vez): cair no app abriria uma segunda sessão.
+        // Com FORCE_COLOR no ambiente, o id vem entre códigos de cor.
+        const id = /backgrounded\s*·\s*([\w-]+)/.exec((out ?? '').replace(ANSI, ''))?.[1];
+        if (id) return ok({ ok: true, id });
         const line = [stderr, out, err?.message].map((t) => (t ?? '').split('\n').map((l) => l.trim()).find(Boolean)).find(Boolean);
         ok({ ok: false, error: (line ?? tr('o claude não começou a sessão')).slice(0, ERROR_MAX) });
       });
@@ -127,8 +153,11 @@ export async function launch(req: SpawnRequest, open: Opener, cli?: CliRunner): 
   let note: string | undefined;
   if (cli) {
     const r = await cli(req).catch((err: unknown) => ({ ok: false as const, error: String((err as Error)?.message ?? err) }));
-    if (r.ok) return { ok: true, how: 'cli' };
+    if (r.ok) return { ok: true, how: 'cli', session: r.id };
     note = cliNote(r.error);
+    // O link do app não leva modelo, esforço, permissão nem conta: com outra conta, abrir lá seria na conta errada.
+    if (req.configDir) return { ok: false, error: note };
+    if (req.choice) note = tr('{0}; o app abre com o modelo, o esforço e a permissão padrão', [note]);
   }
   const o = await open(spawnUrl(req)).catch(() => ({ ok: false as const, error: tr('falhou ao abrir o app') }));
   if (!o.ok) return note ? { ok: false, error: tr('{0}; e o app não abriu ({1})', [note, o.error]).slice(0, ERROR_MAX) } : o;
@@ -179,6 +208,8 @@ export interface SpawnServiceOptions {
   folderProblem?: (folder: string) => string | undefined;
   /** Anexos enviados antes do pedido (POST /api/spawn/attachments); ausente = pedidos sem anexos. */
   attachments?: AttachmentStore;
+  /** Pasta da conta pelo id (modo direto); ausente = só a conta padrão. */
+  accountDir?: (id: string) => { dir: string; isDefault: boolean } | undefined;
   /** Modo direto: grava os anexos e devolve os caminhos (padrão: ~/.habblaud/attachments/). */
   writeFiles?: (spawnId: string, files: readonly Attachment[]) => string[];
   now?: () => number;
@@ -189,6 +220,8 @@ export type SpawnSubmit = { spawn: SpawnInfo } | { error: 'invalid' | 'unavailab
 
 export class SpawnService {
   private readonly entries = new Map<string, Entry>();
+  /** Id curto da sessão (`claude --bg`) -> esforço pedido. */
+  private readonly efforts = new Map<string, string>();
   private hostSeenAt = -Infinity;
   private readonly now: () => number;
 
@@ -209,6 +242,12 @@ export class SpawnService {
     this.prune();
     const req = parseSpawn(raw);
     if ('error' in req) return { error: 'invalid', reason: req.error };
+    if ((req.choice || req.account) && !this.opts.opener) return { error: 'invalid', reason: tr('modelo, esforço, permissão e conta só valem com o Habblaud rodando direto no computador (sem Docker)') };
+    if (req.account) {
+      const acc = this.opts.accountDir?.(req.account);
+      if (!acc) return { error: 'invalid', reason: tr('conta desconhecida') };
+      if (!acc.isDefault) req.configDir = acc.dir;
+    }
     if (!this.available()) {
       return { error: 'unavailable', reason: tr('o auxiliar do computador não está rodando: deixe npm run codex:bridge no ar (o Habblaud está no Docker)') };
     }
@@ -228,6 +267,12 @@ export class SpawnService {
     this.entries.set(info.id, entry);
     if (this.opts.opener) void this.openDirect(entry, this.opts.opener);
     return { spawn: { ...info } };
+  }
+
+  /** Esforço pedido para a sessão (pelo começo do id), se foi o Habblaud que a começou. */
+  effortOf(sessionId: string): string | undefined {
+    for (const [short, effort] of this.efforts) if (short.length >= 8 && sessionId.startsWith(short)) return effort;
+    return undefined;
   }
 
   get(id: string): SpawnInfo | undefined {
@@ -280,8 +325,13 @@ export class SpawnService {
     } finally {
       this.dropFiles(e);
     }
-    const req = { folder: e.req.folder, prompt: promptWithAttachments(e.req.prompt, paths) };
-    this.resolve(e, await launch(req, opener, this.opts.cli));
+    const req = { ...e.req, prompt: promptWithAttachments(e.req.prompt, paths) };
+    const r = await launch(req, opener, this.opts.cli);
+    if (r.ok && r.session && req.choice?.effort) {
+      this.efforts.set(r.session, req.choice.effort);
+      if (this.efforts.size > EFFORTS_MAX) this.efforts.delete(this.efforts.keys().next().value!);
+    }
+    this.resolve(e, r);
   }
 
   /** Os anexos do pedido saem da memória (e do teto do AttachmentStore). */
@@ -297,6 +347,7 @@ export class SpawnService {
     else if ('how' in r) {
       e.info.how = r.how;
       if (r.note) e.info.note = r.note;
+      if (r.session) e.info.session = r.session;
     }
     e.at = this.now();
   }

@@ -258,3 +258,12 @@ describe('pathFromUri', () => {
     expect(pathFromUri('file:///home/user/a%2Fb.png')).toBe('/home/user/a/b.png');
   });
 });
+
+describe('rollout do Codex: esforço', () => {
+  it('turn_context traz o esforço (no topo ou nas configurações do modo de colaboração)', () => {
+    const { state } = feed([R.turnContext({ model: 'gpt-x' })]);
+    expect([state.model, state.effort]).toEqual(['gpt-x', 'medium']);
+    const nested = JSON.stringify({ timestamp: '2026-10-10T00:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-x', collaboration_mode: { settings: { reasoning_effort: 'high' } } } });
+    expect(feed([nested], state).state.effort).toBe('high');
+  });
+});

@@ -11,7 +11,7 @@ import type { UiComponent, UiContext } from './context';
 import { h, iconButton, setHidden, setText } from './dom';
 import { ICONS } from './icons';
 import { maximizeButton, Movable } from './movable';
-import { closePty, createPty, stopAgent, takeoverAgent } from './ptyapi';
+import { closePty, createPty, stopAgent, takeoverAgent, type CodexLaunch } from './ptyapi';
 import { keyboardInset } from './ptykeys';
 import type { PtyPane } from './ptypane';
 import { askPassword, confirmedRecently, withReauth } from './reauth';
@@ -35,7 +35,8 @@ export interface PtyControl {
   openAgent(agentId: string): void;
   close(): void;
   takeover(agentId: string): Promise<void>;
-  newSession(cwd: string, account?: string): Promise<void>;
+  /** Sessão nova num terminal daqui: Claude Code, ou o Codex com `codex`. false = não abriu (senha não confirmada). */
+  newSession(cwd: string, account?: string, codex?: CodexLaunch): Promise<boolean>;
   stop(agentId: string): Promise<void>;
 }
 
@@ -156,9 +157,10 @@ export class PtyPanel implements UiComponent, PtyControl {
     if (p) this.show(p, true);
   }
 
-  async newSession(cwd: string, account?: string): Promise<void> {
-    const p = await withReauth(() => createPty(cwd, account));
+  async newSession(cwd: string, account?: string, codex?: CodexLaunch): Promise<boolean> {
+    const p = await withReauth(() => createPty(cwd, account, codex));
     if (p) this.show(p, true);
+    return !!p;
   }
 
   async stop(agentId: string): Promise<void> {
@@ -182,7 +184,7 @@ export class PtyPanel implements UiComponent, PtyControl {
       this.pendingSelect = null;
       this.ctx.select({ type: 'agent', id: agent.id });
     }
-    setText(this.nameEl, agent?.name ?? 'Claude Code');
+    setText(this.nameEl, agent?.name ?? (cur.agent === 'codex' ? 'Codex' : 'Claude Code'));
     updateAccountChip(this.accEl, this.ctx.account(cur.account), cur.account);
     setText(this.roomEl, agent?.title ?? cur.cwd);
     const ended = cur.exitedAt !== undefined;

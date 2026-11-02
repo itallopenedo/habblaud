@@ -408,3 +408,70 @@ describe('carregar o node-pty e achar o claude', () => {
     }),
   );
 });
+
+describe('Codex no terminal (Novo agente)', () => {
+  function codexSetup(find?: PtyManagerOptions['codexAgents']) {
+    const spawned: { file: string; args: string[]; env: NodeJS.ProcessEnv }[] = [];
+    let now = 1_000_000;
+    const manager = new PtyManager({
+      spawn: (file, args, o) => {
+        spawned.push({ file, args, env: o.env });
+        return new FakeProc(7000 + spawned.length);
+      },
+      claudeBin: process.execPath,
+      codexBin: process.execPath,
+      accounts: () => [{ id: 'acc', dir: join(tmpdir(), 'conta'), isDefault: true }],
+      codexAccounts: () => [
+        { id: '.codex', dir: join(tmpdir(), '.codex'), isDefault: true },
+        { id: '.codex-b', dir: join(tmpdir(), '.codex-b'), isDefault: false },
+      ],
+      codexAgents: find,
+      agent: () => undefined,
+      onChange: () => {},
+      env: { PATH: '/bin', CODEX_HOME: '/velho', CLAUDECODE: '1' },
+      now: () => now,
+    });
+    return { manager, spawned, tick: (ms: number) => (now += ms) };
+  }
+
+  it('abre o codex com as escolhas e a conta (CODEX_HOME), sem as variáveis da sessão de origem', () => {
+    const { manager, spawned } = codexSetup();
+    const info = manager.create({ cwd: tmpdir(), account: '.codex-b', codex: { choice: { model: 'gpt-x', effort: 'high' }, prompt: 'oi' } });
+    expect(info).toMatchObject({ agent: 'codex', account: '.codex-b', agentId: '' });
+    expect(spawned[0].args).toEqual(['-C', tmpdir(), '-m', 'gpt-x', '-c', 'model_reasoning_effort="high"', '--', 'oi']);
+    expect(spawned[0].env.CODEX_HOME).toBe(join(tmpdir(), '.codex-b'));
+    expect(spawned[0].env.CLAUDECODE).toBeUndefined();
+    manager.create({ cwd: tmpdir(), codex: { choice: {} } });
+    expect(spawned[1].env.CODEX_HOME).toBeUndefined();
+    expect(() => manager.create({ cwd: tmpdir(), account: 'acc', codex: { choice: {} } })).toThrow(PtyError);
+  });
+
+  it('sem o binário do Codex, recusa', () => {
+    const m = new PtyManager({ spawn: () => new FakeProc(1), claudeBin: process.execPath, accounts: () => [], agent: () => undefined, onChange: () => {} });
+    expect(() => m.create({ cwd: tmpdir(), codex: { choice: {} } })).toThrow(/Codex não está instalado/);
+  });
+
+  it('liga o terminal ao agente do Codex só sem dúvida, e não "encerra" agente vazio', async () => {
+    const calls: number[] = [];
+    let found: string[] = [];
+    const { manager, tick } = codexSetup(({ since }) => (calls.push(since), found));
+    const info = manager.create({ cwd: tmpdir(), codex: { choice: {} } });
+    expect(manager.list()[0].agentId).toBe('');
+    found = ['.codex:a', '.codex:b'];
+    expect(manager.list()[0].agentId).toBe(''); // dois candidatos: na dúvida, não liga
+    found = ['.codex:a'];
+    tick(1_000);
+    expect(manager.list()[0].agentId).toBe('.codex:a');
+    expect(calls.at(-1)).toBe(info.startedAt - 5_000);
+    // Dois terminais esperando na mesma pasta e conta: nenhum liga, nem com um candidato só.
+    manager.create({ cwd: tmpdir(), codex: { choice: {} } });
+    manager.create({ cwd: tmpdir(), codex: { choice: {} } });
+    found = ['.codex:a', '.codex:c'];
+    expect(manager.list().map((p) => p.agentId)).toEqual(['.codex:a', '', '']);
+    await expect(manager.stop('')).rejects.toThrow();
+    tick(2 * 60_000 + 1);
+    const n = calls.length;
+    manager.list();
+    expect(calls.length).toBe(n);
+  });
+});
