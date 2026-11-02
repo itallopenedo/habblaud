@@ -3369,4 +3369,5 @@ export const FR: Readonly<Record<string, string>> = {
   "fora da pasta do agente": "hors du dossier de l'agent",
   "{0} · responda pelos botões na gaveta do agente ou no Claude Desktop": "{0} · répondez avec les boutons du panneau de l'agent ou dans Claude Desktop",
   "{0} · responda no Claude Desktop": "{0} · répondez dans Claude Desktop",
+  "Anexos antigos apagados: {0} (mais de 7 dias, em {1}).": "Pièces jointes anciennes supprimées : {0} (plus de 7 jours, dans {1}).",
 };

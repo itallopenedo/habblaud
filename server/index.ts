@@ -44,7 +44,7 @@ import { getLocale, tr } from '../shared/i18n';
 import type { WorldLocale } from '../shared/world/protocol';
 import { createCliRunner, createOpener, SpawnService } from './spawn/spawn';
 import { runnableClaudeBin } from './claude-bin';
-import { AttachmentStore, attachmentsRoot, writeMessageAttachments } from './spawn/attachments';
+import { AttachmentStore, attachmentsRoot, startAttachmentsCleanup, writeMessageAttachments } from './spawn/attachments';
 import { HostFileWriter } from './spawn/host-writer';
 import { recentFolders } from './spawn/folders';
 import { isDemoId } from '../shared/timeline';
@@ -289,6 +289,8 @@ const dictation = config.messages
   : undefined;
 // Anexos das mensagens no Docker: quem grava no Mac é o auxiliar do host (npm run codex:bridge).
 const attachmentWriter = config.messages && config.inDocker ? new HostFileWriter() : undefined;
+// Pastas de anexos com mais de 7 dias: no modo Node o servidor grava, então ele limpa (no Docker, o auxiliar do host).
+if (!config.inDocker) startAttachmentsCleanup(attachmentsRoot(), (line) => log.info(line));
 const messages = config.messages
   ? new MessageRegistry({
       office,

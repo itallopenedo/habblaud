@@ -12,6 +12,9 @@ do meio (0.**3**.0).
 
 ### Corrigido
 
+- **Anexos antigos são apagados sozinhos.** As pastas em `~/.habblaud/attachments/` com mais de 7 dias (só as que o
+  Habblaud criou, sem seguir links) saem ao subir o servidor e a cada 6 h. No Docker, quem limpa é o auxiliar do host
+  (`npm run codex:bridge`), porque é ele que grava os anexos.
 - **Rodapé do terminal na pergunta do Claude Desktop.** Em vez de dizer que o pedido "não chegou ao Habblaud", o rodapé
   manda responder pelos botões na gaveta do agente ou no Claude Desktop.
 - **Aba Arquivos abre só o que está na pasta do próprio agente.** Antes valia qualquer pasta com projeto do Claude Code
