@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -17,6 +18,8 @@ import { createPtyRoutes } from './pty';
 import { CONFIRM_MS, COOKIE, createRemoteGate, isRemoteRequest, LoginThrottle, readCookie, RemoteSessions, type RemoteConfig, type RemoteFeature } from './remote';
 import { Hub } from './sse';
 import { TerminalStreams } from './terminal';
+import { createHermesIngest } from '../hermes/http';
+import type { HermesEvent } from '../sources/hermes/source';
 
 setQuiet(true);
 
@@ -109,6 +112,10 @@ const HASH_TEXT = await hashPassword(PASSWORD, 10);
 const CFG = { user: 'ana', passwordHash: parsePasswordHash(HASH_TEXT)!, passwordHashText: HASH_TEXT };
 const TS_HOST = 'mac.tail.ts.net:8443';
 const TS = { Host: TS_HOST, 'Tailscale-User-Login': 'ana@example.com' };
+const HERMES_TOKEN = 'tok_'.padEnd(43, 'h');
+const HERMES_HASH = createHash('sha256').update(HERMES_TOKEN).digest();
+const HERMES_AUTH = { Authorization: `Bearer ${HERMES_TOKEN}` };
+const HERMES_BODY = { v: 1, events: [{ profile: 'Íon', session: '0123456789abcdef', event: 'on_session_start', at: 1_800_000_000_000 }] };
 
 /**
  * Porta do celular na rede (LAN) e porta da tailnet sobre a MESMA API e as mesmas sessões, como no server/index.ts; o
@@ -203,6 +210,16 @@ async function start(allow: RemoteFeature[], opts: { realPty?: boolean; caFile?:
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end('<!doctype html><title>Habblaud</title>');
   };
+  // Eventos do Hermes: como no index.ts, só no listener da tailnet, depois do usuário do Tailscale e antes do login.
+  const hermesApplied: HermesEvent[] = [];
+  const hermesIngest = createHermesIngest({ tokenHash: HERMES_HASH, apply: (evs) => void hermesApplied.push(...evs) });
+  // A porta local (4747): só o guard e a API, como no index.ts.
+  const local = http.createServer((req, res) => {
+    if (guard(req, res)) return;
+    const url = new URL(req.url ?? '/', 'http://x');
+    if (!api(req, res, url)) page(res);
+  });
+  local.listen(0, '127.0.0.1');
   const lan = http.createServer((req, res) => {
     if (guard(req, res)) return;
     const url = new URL(req.url ?? '/', 'http://x');
@@ -216,11 +233,13 @@ async function start(allow: RemoteFeature[], opts: { realPty?: boolean; caFile?:
       if (guard(req, res)) return;
       if (tailnetGate(req, res)) return;
       const url = new URL(req.url ?? '/', 'http://x');
+      if (hermesIngest(req, res, url)) return;
       if (tsGate(req, res, url)) return;
       if (!api(req, res, url)) page(res);
     },
     { error: () => {} },
   );
+  const localBase = await listen(local);
   const lanBase = await listen(lan);
   const tsBase = await listen(tailnet);
   closers.push(async () => {
@@ -228,7 +247,7 @@ async function start(allow: RemoteFeature[], opts: { realPty?: boolean; caFile?:
     hub.stop();
     tmp.cleanup();
   });
-  return { lanBase, tsBase, ptyCalls, advance: (ms: number) => void (clock += ms) };
+  return { localBase, lanBase, tsBase, ptyCalls, hermesApplied, advance: (ms: number) => void (clock += ms) };
 }
 
 /** Requisição crua (o fetch do Node não deixa trocar o Host). */
@@ -473,5 +492,46 @@ describe('terminal interativo pela tailnet com o roteador de verdade (createPtyR
     expect((await call(s.tsBase, ['GET', '/api/pty/m1/stream'], { ...h, Origin: 'https://evil.example' })).status).toBe(403);
     expect((await call(s.tsBase, ['GET', '/api/pty/m1/stream'], { ...h, 'Sec-Fetch-Site': 'cross-site' })).status).toBe(403);
     expect(s.ptyCalls).toEqual([]);
+  });
+});
+
+describe('eventos do Hermes: só pela porta da tailnet, com o usuário do Tailscale e o token, sem login', () => {
+  it('tailnet com o usuário do Tailscale e o token, sem login: 200 e o evento chega à fonte', async () => {
+    const s = await start(['permissions']);
+    const r = await request(s.tsBase, '/api/hermes/events', { method: 'POST', body: HERMES_BODY, headers: { ...TS, ...HERMES_AUTH } });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.body)).toEqual({ ok: true, n: 1 });
+    expect(s.hermesApplied).toHaveLength(1);
+  });
+
+  it('tailnet sem o cabeçalho do Tailscale ou pelo Funnel: 403 antes do token; token errado: 401; nada chega à fonte', async () => {
+    const s = await start(['permissions']);
+    const post = (headers: Record<string, string>) => request(s.tsBase, '/api/hermes/events', { method: 'POST', body: HERMES_BODY, headers });
+    expect((await post({ Host: TS_HOST, ...HERMES_AUTH })).status).toBe(403);
+    expect((await post({ ...TS, 'Tailscale-User-Login': 'bob@example.com', ...HERMES_AUTH })).status).toBe(403);
+    expect((await post({ ...TS, 'Tailscale-Funnel-Request': '?1', ...HERMES_AUTH })).status).toBe(403);
+    expect((await post({ ...TS })).status).toBe(401);
+    expect((await post({ ...TS, Authorization: `Bearer ${'x'.repeat(43)}` })).status).toBe(401);
+    expect((await post({ ...TS, ...HERMES_AUTH, Origin: 'https://evil.example' })).status).toBe(403);
+    expect(s.hermesApplied).toEqual([]);
+  });
+
+  it('o token do Hermes não abre mais nada: as outras rotas da tailnet continuam pedindo login (401)', async () => {
+    const s = await start(['permissions', 'terminal', 'pty']);
+    for (const [method, path] of [['GET', '/api/snapshot'], ['GET', '/api/pty'], ['POST', '/api/hermes/events/'], ['POST', '/api/hermes']] as const) {
+      const r = await request(s.tsBase, path, { method, headers: { ...TS, ...HERMES_AUTH }, ...(method === 'POST' ? { body: HERMES_BODY } : {}) });
+      expect(r.status, `${method} ${path}`).toBe(401);
+    }
+    expect(s.hermesApplied).toEqual([]);
+  });
+
+  it('portas 4747 (local) e 4748 (celular na rede, mesmo logado): a rota não existe (404)', async () => {
+    const s = await start(['permissions', 'messages', 'terminal', 'spawn', 'pty']);
+    const local = await request(s.localBase, '/api/hermes/events', { method: 'POST', body: HERMES_BODY, headers: { Host: '127.0.0.1', ...HERMES_AUTH } });
+    expect(local.status).toBe(404);
+    const { cookie } = await login(s.lanBase);
+    const lan = await request(s.lanBase, '/api/hermes/events', { method: 'POST', body: HERMES_BODY, headers: { Cookie: cookie, ...HERMES_AUTH } });
+    expect(lan.status).toBe(404);
+    expect(s.hermesApplied).toEqual([]);
   });
 });

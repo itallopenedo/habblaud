@@ -398,9 +398,11 @@ export function terminalFooter(agent: AgentInfo | undefined, agents: readonly Ag
           ? agent.canMessage && canAnswer
             ? tr('{0} · responda pelos botões na gaveta do agente ou no Claude Desktop', [text])
             : tr('{0} · responda no Claude Desktop', [text])
-          : agent.provider === 'codex'
-            ? tr('{0} · responda no Codex: este pedido não chegou ao Habblaud ou passou do tempo de espera', [text])
-            : tr('{0} · responda no Claude Code: este pedido não chegou ao Habblaud ou passou do tempo de espera', [text]);
+          : agent.provider === 'hermes'
+            ? tr('{0} · responda no canal do Hermes', [text])
+            : agent.provider === 'codex'
+              ? tr('{0} · responda no Codex: este pedido não chegou ao Habblaud ou passou do tempo de espera', [text])
+              : tr('{0} · responda no Claude Code: este pedido não chegou ao Habblaud ou passou do tempo de espera', [text]);
       return { kind: 'waiting', text: hint, since: agent.statusSince };
     }
     default:

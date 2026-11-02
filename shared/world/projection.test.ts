@@ -317,6 +317,24 @@ describe('projeção: regras', () => {
     expect(validate(u)).toEqual([]);
   });
 
+  it('Hermes nunca entra: nem o agente, nem a sala só dele, nem pedido de id do mundo', () => {
+    const ids = new FakeIds();
+    const rooms = [room('/p/a'), room('hermes:/Íon')];
+    const agents = [
+      agent('m1', '/p/a'),
+      agent('hermes:0123456789abcdef', 'hermes:/Íon', { provider: 'hermes' }),
+      agent('hermes:fedcba9876543210', '/p/a', { provider: 'hermes', status: 'waiting' }),
+    ];
+    const u = project(input(rooms, agents), ids, NOW);
+    expect(u.floors).toHaveLength(1);
+    expect(agentsOf(u).map((a) => a.provider)).toEqual(['claude']);
+    expect(ids.calls.some((c) => c.startsWith('hermes'))).toBe(false);
+    expect(JSON.stringify(u).toLowerCase()).not.toContain('hermes');
+    expect(validate(u)).toEqual([]);
+    // Só o Hermes trabalhando: prédio sem andares.
+    expect(project(input([room('hermes:/Íon')], [agents[1]]), new FakeIds(), NOW).floors).toEqual([]);
+  });
+
   it('provider ausente é claude; codex continua codex', () => {
     const u = project(input([room('/p/a')], [agent('m1', '/p/a'), agent('m2', '/p/a', { provider: 'codex' })]), new FakeIds(), NOW);
     expect(agentsOf(u).map((a) => a.provider).sort()).toEqual(['claude', 'codex']);

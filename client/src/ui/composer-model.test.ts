@@ -73,6 +73,7 @@ describe('caixa de mensagem (peças puras)', () => {
     expect(off(agent({ canMessage: undefined }), { enabled: false })).toMatch(/terminal do Claude Code/);
     expect(off(agent(), { local: false })).toMatch(/localhost/);
     expect(off(agent(), { replaying: true })).toMatch(/timelapse/);
+    expect(off(agent({ provider: 'hermes', canMessage: true }))).toBe('O Hermes só é acompanhado aqui: responda no canal dele');
   });
 
   it('texto: sai sem os espaços do fim; vazio ou longo demais não manda', () => {

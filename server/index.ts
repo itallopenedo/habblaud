@@ -38,6 +38,8 @@ import { ClaudeWatcher } from './sources/watcher';
 import { discoverCodexDirs } from './sources/codex/accounts';
 import { CodexHistory } from './sources/codex/history';
 import { CodexSource } from './sources/codex/source';
+import { createHermesIngest, HERMES_EVENTS_PATH } from './hermes/http';
+import { HermesSource } from './sources/hermes/source';
 import { createBuildReader, readBuildInfo } from './build';
 import { UpdateChecker } from './updates/checker';
 import { getLocale, tr } from '../shared/i18n';
@@ -147,6 +149,10 @@ if (codex) agents.add(codex);
 // Eventos dos hooks do Codex (POST /api/codex/events, mod/habblaud-codex/hook.mjs): vão para a fonte do Codex ao vivo
 // (CodexLive); sem ela (nenhuma pasta do Codex ou HABBLAUD_CODEX=0) a rota responde {ok: false}.
 const codexLive: CodexLive | undefined = codex;
+// Hermes (Fase 6): agentes do Hermes Agent da VPS, pelos eventos do plugin habblaud-observer (POST /api/hermes/events,
+// só na porta da tailnet e com o token; HABBLAUD_HERMES_TOKEN_HASH). Sem a hash, nem a fonte nem a rota existem.
+const hermes = config.hermes ? new HermesSource({ office }) : undefined;
+if (hermes) agents.add(hermes);
 late.office = office;
 late.agents = agents;
 // Página que pode responder pelo escritório: Host local na porta local; na remota, só com permissions liberado.
@@ -529,6 +535,8 @@ if (config.tailnet && config.remote && remoteSessions) {
   const remote = config.remote;
   const tailnetGate = createTailnetGate(tailnet);
   const gate = createTailnetRemoteGate(remote, remoteSessions);
+  // A única rota desta porta sem o login: os eventos do Hermes, com o token (server/hermes/http.ts).
+  const hermesIngest = hermes && config.hermes ? createHermesIngest({ tokenHash: config.hermes.tokenHash, apply: (evs) => hermes.apply(evs) }) : undefined;
   tailnetServer = startTailnetListener(
     tailnet.port,
     (req, res) => {
@@ -536,6 +544,7 @@ if (config.tailnet && config.remote && remoteSessions) {
       try {
         if (guard(req, res)) return;
         if (tailnetGate(req, res)) return;
+        if (hermesIngest?.(req, res, url)) return;
         if (gate(req, res, url)) return;
         if (!api(req, res, url)) fallback(req, res, url);
       } catch (err) {
@@ -577,6 +586,8 @@ server.listen(config.port, config.host, () => {
   } else {
     log.info(tr('   Codex: {0}.', [config.codex ? tr('nenhuma pasta do Codex encontrada (defina HABBLAUD_CODEX_DIRS)') : tr('desligado (HABBLAUD_CODEX=0)')]));
   }
+  log.info(hermes ? tr('   Hermes: recebendo eventos pela porta da tailnet ({0}).', [HERMES_EVENTS_PATH]) : tr('   Hermes: desligado (defina HABBLAUD_HERMES_TOKEN_HASH).'));
+  if (config.hermesWarning) log.warn(`   ${config.hermesWarning}.`);
   if (office.isDemo()) log.info(tr('   Modo demonstração ligado (agentes simulados misturados aos reais).'));
   if (config.terminal) log.info(tr('   Terminal: ligado (acesso só local).'));
   else log.info(tr('   Terminal: desligado ({0}).', [terminalOffReason(process.env, config.host, config.inDocker)]));

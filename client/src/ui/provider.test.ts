@@ -51,6 +51,14 @@ describe('ferramenta (Claude Code ou Codex)', () => {
     expect(showsProviderTag('codex', 'Codex')).toBe(false);
     expect(showsProviderTag('codex', 'Demo Codex')).toBe(false);
     expect(showsProviderTag('claude', 'Conta C')).toBe(false);
+    expect(showsProviderTag('hermes', '')).toBe(true);
+    expect(showsProviderTag('hermes', 'hermes')).toBe(false);
+  });
+
+  it('Hermes: chip "H" sem conta local, rótulo só com a ferramenta', () => {
+    expect(fallbackShort('hermes', 'hermes')).toBe('H');
+    expect(accountProvider(undefined, 'hermes', 'hermes')).toBe('hermes');
+    expect(accountChipLabel(undefined, 'hermes', 'hermes')).toBe('Hermes');
   });
 
   it('rótulo do chip: e-mail no Claude Code; ferramenta e plano no Codex', () => {
