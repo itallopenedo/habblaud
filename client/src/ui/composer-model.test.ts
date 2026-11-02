@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentInfo } from '../../../shared/types';
 import {
+  attachmentProblem,
   canSend,
   CODEX_BRIDGE_HINT,
   CODEX_TIMEOUT_ERROR,
@@ -9,6 +10,8 @@ import {
   DELIVERED_SHOW_MS,
   enterSends,
   isSettled,
+  MESSAGE_FILE_BYTES,
+  MESSAGE_FILES_MAX,
   messageText,
   PLUGIN_HINT,
   pollDelay,
@@ -127,5 +130,15 @@ describe('caixa de mensagem (peças puras)', () => {
     expect(pollDelay(0)).toBeLessThan(1_000);
     expect(pollDelay(20_000)).toBeGreaterThan(pollDelay(0));
     expect(pollDelay(60_000)).toBeGreaterThanOrEqual(pollDelay(20_000));
+  });
+
+  it('anexos: com arquivo a mensagem pode ir sem texto; limite de quantidade, vazio e tamanho', () => {
+    expect(canSend('', 0)).toBe(false);
+    expect(canSend('  ', 1)).toBe(true);
+    expect(canSend('x'.repeat(20_001), 1)).toBe(false);
+    expect(attachmentProblem({ name: 'a.jpg', size: 10 }, 0)).toBeUndefined();
+    expect(attachmentProblem({ name: 'a.jpg', size: 10 }, MESSAGE_FILES_MAX)).toMatch(/No máximo 8/);
+    expect(attachmentProblem({ name: 'a.jpg', size: 0 }, 0)).toMatch(/vazio/);
+    expect(attachmentProblem({ name: 'a.jpg', size: MESSAGE_FILE_BYTES + 1 }, 0)).toMatch(/passa de 15 MB/);
   });
 });

@@ -5117,7 +5117,7 @@ button.ui-term__think:hover,
 }
 
 .ui-term__prompt--mic {
-  grid-template-columns: 2ch minmax(0, 1fr) auto auto;
+  grid-template-columns: 2ch minmax(0, 1fr) auto auto auto;
 }
 
 .ui-term__prompt:focus-within {
@@ -7913,6 +7913,10 @@ html.is-replay #world {
 
 .ui-spawn__files:empty {
   display: none;
+}
+
+.ui-msg__files {
+  margin-top: 6px;
 }
 
 .ui-spawn__file {

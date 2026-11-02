@@ -50,9 +50,21 @@ export function messageText(raw: string): string {
   return raw.replace(/\s+$/, '');
 }
 
-export function canSend(raw: string): boolean {
+export function canSend(raw: string, files = 0): boolean {
   const text = messageText(raw);
-  return text.trim().length > 0 && text.length <= MESSAGE_MAX;
+  return (text.trim().length > 0 || files > 0) && text.length <= MESSAGE_MAX;
+}
+
+/** Os mesmos limites do servidor (server/spawn/attachments.ts). */
+export const MESSAGE_FILES_MAX = 8;
+export const MESSAGE_FILE_BYTES = 15 * 1024 * 1024;
+
+/** Por que o arquivo não entra na mensagem (undefined = entra); `count` = quantos já estão anexados. */
+export function attachmentProblem(f: { name: string; size: number }, count: number): string | undefined {
+  if (count >= MESSAGE_FILES_MAX) return tr('No máximo {0} anexos por mensagem.', [MESSAGE_FILES_MAX]);
+  if (!f.size) return tr('{0} está vazio.', [f.name]);
+  if (f.size > MESSAGE_FILE_BYTES) return tr('{0} passa de {1} MB.', [f.name, MESSAGE_FILE_BYTES / 1024 / 1024]);
+  return undefined;
 }
 
 /** Enter manda; Shift+Enter (e Alt+Enter) quebram a linha; Enter compondo um acento (IME) não conta. */

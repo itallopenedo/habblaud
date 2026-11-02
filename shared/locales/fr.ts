@@ -3305,6 +3305,9 @@ export const FR: Readonly<Record<string, string>> = {
   "O carimbo não foi deixado. Tente de novo.": "Le tampon n'a pas été laissé. Réessayez.",
 
   // Fase 4 — mídia
+  "Anexar foto ou arquivo": "Joindre une photo ou un fichier",
+  "No máximo {0} anexos por mensagem.": "Au maximum {0} pièces jointes par message.",
+  "{0} está vazio.": "{0} est vide.",
   "anexos demais sendo gravados: tente de novo": "trop de pièces jointes en cours d'enregistrement : réessayez",
   "o computador não gravou os anexos a tempo": "l'ordinateur n'a pas enregistré les pièces jointes à temps",
   "o computador não gravou os anexos": "l'ordinateur n'a pas enregistré les pièces jointes",

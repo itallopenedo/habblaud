@@ -3289,6 +3289,9 @@ export const ES: Readonly<Record<string, string>> = {
   "O carimbo não foi deixado. Tente de novo.": "El sello no se dejó. Inténtalo de nuevo.",
 
   // Fase 4 — mídia
+  "Anexar foto ou arquivo": "Adjuntar foto o archivo",
+  "No máximo {0} anexos por mensagem.": "Como máximo {0} adjuntos por mensaje.",
+  "{0} está vazio.": "{0} está vacío.",
   "anexos demais sendo gravados: tente de novo": "demasiados adjuntos guardándose: inténtalo de nuevo",
   "o computador não gravou os anexos a tempo": "el equipo no guardó los adjuntos a tiempo",
   "o computador não gravou os anexos": "el equipo no guardó los adjuntos",

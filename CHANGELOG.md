@@ -26,6 +26,10 @@ do meio (0.**3**.0).
 
 ### Adicionado
 
+- **Foto ou arquivo na mensagem.** A caixa de mensagem (na gaveta e no terminal) ganhou o clipe: no iPhone, câmera,
+  fotos ou arquivos. Os arquivos vão para `~/.habblaud/attachments` no Mac (no Docker, gravados pelo
+  `npm run codex:bridge`) e a mensagem leva os caminhos, para o Claude Code e para o Codex. Até 8 anexos de 15 MB por
+  mensagem; vale a trava das mensagens (`messages` no acesso pelo celular).
 - **Imagens na conversa do terminal.** Prints e fotos da conversa (coladas no prompt ou no resultado de uma
   ferramenta, como uma captura de tela) aparecem como miniaturas no terminal; um toque abre a imagem grande. A imagem
   só é buscada quando aparece (`GET /api/terminal/image`), com a mesma trava do terminal; o terminal do Codex continua

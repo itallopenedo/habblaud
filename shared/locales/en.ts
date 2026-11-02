@@ -3288,6 +3288,9 @@ export const EN: Readonly<Record<string, string>> = {
   "O carimbo não foi deixado. Tente de novo.": "The stamp wasn't left. Try again.",
 
   // Fase 4 — mídia
+  "Anexar foto ou arquivo": "Attach a photo or file",
+  "No máximo {0} anexos por mensagem.": "At most {0} attachments per message.",
+  "{0} está vazio.": "{0} is empty.",
   "anexos demais sendo gravados: tente de novo": "too many attachments being saved: try again",
   "o computador não gravou os anexos a tempo": "the computer didn't save the attachments in time",
   "o computador não gravou os anexos": "the computer didn't save the attachments",
