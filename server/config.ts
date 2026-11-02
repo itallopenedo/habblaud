@@ -227,6 +227,14 @@ export function worldSocketUrl(base: string): string {
   return `${base.replace(/^http/, 'ws').replace(/\/+$/, '')}/v1/socket`;
 }
 
+/** Lidas só por loadConfig: com o `node --env-file`, ficariam no ambiente de todo filho (terminal interativo, Novo agente, codex, whisper). */
+const SECRET_ENV = ['HABBLAUD_REMOTE_PASSWORD_HASH', 'HABBLAUD_REMOTE_PASSWORD', 'HABBLAUD_REMOTE_USER', 'HABBLAUD_TAILNET_USER'] as const;
+
+/** Tira do ambiente o que loadConfig já leu e nenhum processo filho deve herdar (chame logo depois de loadConfig). */
+export function scrubSecretsFromEnv(env: NodeJS.ProcessEnv = process.env): void {
+  for (const k of SECRET_ENV) delete env[k];
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, argv: string[] = process.argv): ServerConfig {
   const home = env.HOME || homedir();
   const inDocker = detectDocker(env);

@@ -2297,6 +2297,18 @@ tail -3 ~/.habblaud/logs/phone-notify.log                        # sem erro novo
   Esperado no log: "Terminal interativo: ligado (/Users/itallopenedo/.local/bin/claude)", "Mensagens ao Codex: pelo
   codex queue (…/codex)", "Acesso remoto: ligado na porta 4748 (0.0.0.0), HTTPS".
 
+- [ ] **Step 8a: Permissão de Arquivos e Pastas do macOS (no Mac, com o Itallo na frente)** — o serviço roda com o
+  Node do fnm (`~/.local/share/fnm/node-versions/<versão>/installation/bin/node`), que o macOS trata como um app novo.
+  Em `http://localhost:4747`: abrir a gaveta → Arquivos de uma sessão de um projeto em `~/Documents/...` e abrir um
+  terminal interativo ("Nova sessão") numa sala em `~/Documents/...`. Se aparecer "node quer acessar arquivos na pasta
+  Documentos", clicar em **Permitir** (sem isso, longe do Mac o pedido fica pendurado e o PTY/Arquivos falham em
+  silêncio). Conferir em Ajustes do Sistema → Privacidade e Segurança → Arquivos e Pastas: `node` com Documentos ligado.
+
+- [ ] **Step 8b: Porta 4748 pelo iPhone no Wi-Fi, antes de sair de casa** — com o iPhone no Wi-Fi de casa, abrir
+  `https://habblaud.local:4748`: precisa abrir a tela de login. Se o Mac mostrar "Deseja que o aplicativo node aceite
+  conexões de entrada?" (firewall do macOS), clicar em **Permitir**; sem isso a 4748 fica muda para a rede e só se
+  descobre fora de casa.
+
 - [ ] **Step 9: Se algo falhar** — ler `~/.habblaud/logs/habblaud.error.log`; não insistir: rollback (Step 10) e voltar
   ao chat com a evidência.
 
@@ -2373,6 +2385,10 @@ launchctl kickstart -k gui/$(id -u)/com.pnd.habblaud
 
 ### Task 12: Ao vivo e registro
 
+- [ ] **Step 0: Antes de sair de casa (no Mac e no Wi-Fi)** — refazer os Steps 8a e 8b da Task 10 se o serviço foi
+  reinstalado com outro Node (outra versão do fnm é outro executável para o macOS): Arquivos e um PTY num projeto em
+  `~/Documents` abrem sem pedido pendente no Mac, e `https://habblaud.local:4748` abre no iPhone pelo Wi-Fi (sem o
+  aviso do firewall para o `node`).
 - [ ] **Step 1: PTY no Mac (localhost)** — `http://localhost:4747`, gaveta de uma sala de teste → "Nova sessão": o
   Claude Code abre na janela interativa; digitar "diga oi" e ver a resposta; fechar a janela e reabrir (a sessão
   continua); "Encerrar" (dois cliques). Conferir que nenhuma senha foi pedida (página local).

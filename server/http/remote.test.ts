@@ -10,6 +10,7 @@ import { Office } from '../model/office';
 import { AgentFiles } from '../deliveries/agent-files';
 import { FileFetcher } from '../deliveries/fetcher';
 import { L, symlinkOrSkip, tempDir, writeLines } from '../test/fixtures';
+import { loadConfig, scrubSecretsFromEnv } from '../config';
 import { createApiHandler, sendJson, type ApiDeps } from './app';
 import { createRequestGuard, isLoopbackHost } from './guard';
 import {
@@ -19,6 +20,7 @@ import {
   isRemoteRequest,
   loadSecret,
   LoginThrottle,
+  OWN_MS,
   parseAllow,
   parseRemoteConfig,
   readCookie,
@@ -770,6 +772,48 @@ describe('RemoteSessions — senha conferida há pouco (terminal pelo celular)',
     s.revoke(a);
     expect(s.owns(a, 'p1')).toBe(false);
     expect(s.confirm(a)).toBe(false);
+  });
+
+  it('relógio que volta para trás: a conferência deixa de valer (falha fechado)', () => {
+    let now = 1_800_000_000_000;
+    const s = new RemoteSessions(SECRET, CFG, () => now);
+    const { token } = s.issue();
+    expect(s.confirmedWithin(token, CONFIRM_MS)).toBe(true);
+    now -= 1;
+    expect(s.confirmedWithin(token, CONFIRM_MS)).toBe(false);
+  });
+
+  it(`o terminal da sessão vale no máximo ${OWN_MS / 3_600_000} h depois de registrado (cada um com o seu prazo)`, () => {
+    let now = 1_800_000_000_000;
+    const s = new RemoteSessions(SECRET, CFG, () => now);
+    const a = s.issue().token;
+    expect(s.claim(a, 'p1')).toBe(true);
+    now += CONFIRM_MS - 1;
+    expect(s.claim(a, 'p2')).toBe(true);
+    now += OWN_MS - CONFIRM_MS + 1;
+    expect(s.owns(a, 'p1')).toBe(false);
+    expect(s.owns(a, 'p2')).toBe(true);
+    now += CONFIRM_MS;
+    expect(s.owns(a, 'p2')).toBe(false);
+  });
+});
+
+describe('segredos fora do ambiente dos filhos', () => {
+  it('scrubSecretsFromEnv: a configuração continua carregada, mas usuário, hash e login do Tailscale saem do ambiente', () => {
+    const env: NodeJS.ProcessEnv = {
+      HOME: '/h',
+      HABBLAUD_REMOTE_USER: 'ana',
+      HABBLAUD_REMOTE_PASSWORD_HASH: HASH_TEXT,
+      HABBLAUD_REMOTE_INSECURE_HTTP: '1',
+      HABBLAUD_TAILNET_USER: 'ana@example.com',
+      HABBLAUD_REMOTE_ALLOW: 'pty',
+      PATH: '/bin',
+    };
+    const config = loadConfig(env, []);
+    scrubSecretsFromEnv(env);
+    expect(config.remote?.user).toBe('ana');
+    expect(config.tailnet?.user).toBe('ana@example.com');
+    expect(Object.keys(env).sort()).toEqual(['HABBLAUD_REMOTE_ALLOW', 'HABBLAUD_REMOTE_INSECURE_HTTP', 'HOME', 'PATH']);
   });
 });
 

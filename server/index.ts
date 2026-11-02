@@ -6,11 +6,11 @@ import http from 'node:http';
 import { join } from 'node:path';
 import { codexDirsRefused, isDefaultDir } from './accounts/detect';
 import { AccountsService } from './accounts/service';
-import { isTruthy, loadConfig, messagesOffReason, terminalOffReason, worldSocketUrl } from './config';
+import { isTruthy, loadConfig, messagesOffReason, scrubSecretsFromEnv, terminalOffReason, worldSocketUrl } from './config';
 import { createApiHandler, sendJson } from './http/app';
 import { createRequestGuard, isLoopbackHost } from './http/guard';
 import { CONFIRM_MS, COOKIE, createRemoteGate, isRemoteRequest, loadSecret, LoginThrottle, readCookie, RemoteSessions, startRemoteListener, type RemoteListener } from './http/remote';
-import { createTailnetGate, isTailnetRequest, startTailnetListener } from './http/tailnet';
+import { createTailnetGate, createTailnetRemoteGate, isTailnetRequest, startTailnetListener } from './http/tailnet';
 import { Hub } from './http/sse';
 import { createStaticHandler } from './http/static';
 import { TerminalStreams } from './http/terminal';
@@ -64,6 +64,8 @@ import { BuildingUplink } from './world/uplink';
 import { WorldViewer } from './world/viewer';
 
 const config = loadConfig();
+// Senha (hash) e usuários do acesso remoto ficam só no `config`: nenhum filho (PTY, Novo agente, codex) os herda.
+scrubSecretsFromEnv();
 const startedAt = Date.now();
 
 // Nome antigo (CodeTown, até a 0.3.2): leva ~/.codetown para ~/.habblaud antes de ler qualquer estado e avisa
@@ -363,12 +365,12 @@ const ticker = setInterval(() => {
   }
 }, 250);
 
-// Sessões e freio do login: os mesmos na porta do celular (4748) e na da tailnet (4749). O login numa vale na outra
-// (cookies não separam portas) e as tentativas de senha somam.
+// Sessões: as mesmas na porta do celular (4748) e na da tailnet (4749); o login numa vale na outra (cookies não separam
+// portas). O freio do login é um por porta (createTailnetRemoteGate): senhas erradas na rede local não travam o celular
+// pela tailnet, que só o usuário do Tailscale alcança.
 const remoteSessions = config.remote
   ? new RemoteSessions(loadSecret(join(config.dataDir, 'remote-secret')), config.remote, Date.now, join(config.dataDir, 'remote-revoked.json'))
   : undefined;
-const loginThrottle = new LoginThrottle();
 
 const api = createApiHandler({
   renameRoom: (id, name) => {
@@ -483,7 +485,7 @@ if (config.remote) {
     sessions: remoteSessions!,
     secure: !!remote.tls,
     caFile: remote.tls?.caFile,
-    throttle: loginThrottle,
+    throttle: new LoginThrottle(),
   });
   remoteListener = startRemoteListener(
     remote,
@@ -523,7 +525,7 @@ if (config.tailnet && config.remote && remoteSessions) {
   const tailnet = config.tailnet;
   const remote = config.remote;
   const tailnetGate = createTailnetGate(tailnet);
-  const gate = createRemoteGate({ config: remote, sessions: remoteSessions, secure: true, caFile: remote.tls?.caFile, throttle: loginThrottle });
+  const gate = createTailnetRemoteGate(remote, remoteSessions);
   tailnetServer = startTailnetListener(
     tailnet.port,
     (req, res) => {

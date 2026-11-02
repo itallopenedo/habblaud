@@ -35,9 +35,9 @@ do meio (0.**3**.0).
 - **Terminal interativo pelo iPhone, só pela tailnet.** Com `HABBLAUD_TAILNET_USER` (o login do Tailscale) e `pty` em
   `HABBLAUD_REMOTE_ALLOW`, o Habblaud abre uma terceira porta só em `127.0.0.1` (`HABBLAUD_TAILNET_PORT`, padrão
   4749), para o `tailscale serve --https=8443` publicar. Toda requisição nela precisa do usuário do Tailscale certo e
-  do mesmo login da porta do celular (mesmas sessões e mesmo freio de senha); abrir, assumir, encerrar e ligar a tela
+  do mesmo login da porta do celular (mesmas sessões, com freio de senha próprio; o Funnel é recusado); abrir, assumir, encerrar e ligar a tela
   de um terminal pedem a senha de novo se a última conferência passou de 10 min (401 `reauth`); sem ela, digitar só vale
-  nos terminais que a mesma sessão abriu ou ligou com a senha recente. Pela rede local (4748)
+  nos terminais que a mesma sessão abriu ou ligou com a senha recente, por até 12 h. Pela rede local (4748)
   o terminal interativo continua recusado. Um processo do próprio Mac consegue imitar o cabeçalho do Tailscale, mas
   ainda precisa do login, de `pty` e da senha recente.
 - **Senha de novo no terminal pelo celular.** Pela porta da tailnet, quando o servidor pede a senha (10 min sem
@@ -46,7 +46,9 @@ do meio (0.**3**.0).
 - **Habblaud como serviço no macOS (`npm run native:install`).** Faz o build e instala um LaunchAgent que mantém o
   Habblaud rodando sem o Docker, com o terminal interativo ligado (`HABBLAUD_PTY=1`), o mesmo `.env` do projeto e logs
   em `~/.habblaud/logs/`. `npm run native:status` mostra o estado e `npm run native:uninstall` tira o serviço (o Docker
-  continua funcionando com `npm run docker:up`).
+  continua funcionando com `npm run docker:up`). Reinstalar troca o serviço num processo à parte (dá para rodar pelo
+  terminal do próprio Habblaud) e só dá sucesso com o Habblaud novo no ar; o serviço sobe em UTF-8 (`LANG`), e a senha
+  (hash) e os usuários do acesso remoto saem do ambiente ao iniciar, sem chegar aos terminais e agentes abertos por ele.
 - **Foto ou arquivo na mensagem.** A caixa de mensagem (na gaveta e no terminal) ganhou o clipe: no iPhone, câmera,
   fotos ou arquivos. Também dá para colar (⌘V no Mac, "Colar" no iPhone) ou arrastar qualquer arquivo para a caixa:
   foto, vídeo, PDF, áudio. Os arquivos vão para `~/.habblaud/attachments` no Mac (no Docker, gravados pelo

@@ -58,6 +58,8 @@ export const COOKIE = 'habblaud_remote';
 export const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 /** Abrir, assumir ou encerrar um terminal interativo pelo celular pede a senha conferida há menos disto. */
 export const CONFIRM_MS = 10 * 60 * 1000;
+/** Teclas, tamanho e fechar sem a senha de novo valem num terminal da sessão por no máximo isto depois de registrado. */
+export const OWN_MS = 12 * 60 * 60 * 1000;
 /** Prazo para o primeiro byte de uma conexão na porta remota (antes de saber se é HTTPS). */
 const FIRST_BYTE_MS = 15_000;
 
@@ -137,10 +139,11 @@ export class RemoteSessions {
   /** Assinatura -> quando a senha foi conferida pela última vez com este token (login ou /api/remote/confirm). Só em memória. */
   private readonly confirmed = new Map<string, number>();
   /**
-   * Assinatura -> terminais interativos que este token abriu, assumiu ou ligou com a senha recente: neles, teclas,
-   * tamanho e fechar não pedem a senha de novo. Só em memória; "Sair" apaga.
+   * Assinatura -> terminais interativos que este token abriu, assumiu ou ligou com a senha recente (id -> até quando):
+   * neles, teclas, tamanho e fechar não pedem a senha de novo, por até OWN_MS (nunca além do token). Só em memória;
+   * "Sair" apaga.
    */
-  private readonly owned = new Map<string, { exp: number; ids: Set<string> }>();
+  private readonly owned = new Map<string, Map<string, number>>();
 
   constructor(
     secret: Buffer,
@@ -178,7 +181,10 @@ export class RemoteSessions {
     const parsed = this.parse(token);
     if (!parsed || this.revoked.has(parsed.sig)) return false;
     const at = this.confirmed.get(parsed.sig);
-    return at !== undefined && this.now() - at < ms;
+    if (at === undefined) return false;
+    // Relógio que voltou para trás: falha fechado.
+    const d = this.now() - at;
+    return d >= 0 && d < ms;
   }
 
   /** Registra o terminal `ptyId` neste token, só com a senha conferida há pouco. */
@@ -186,19 +192,25 @@ export class RemoteSessions {
     const parsed = this.parse(token);
     if (!parsed || this.revoked.has(parsed.sig) || !this.confirmedWithin(token, CONFIRM_MS)) return false;
     const now = this.now();
-    for (const [sig, o] of this.owned) if (o.exp <= now) this.owned.delete(sig);
-    const entry = this.owned.get(parsed.sig) ?? { exp: parsed.exp, ids: new Set<string>() };
-    entry.ids.add(ptyId);
-    // ponytail: teto simples por token (os mais antigos saem primeiro); terminais já fechados ficam até lá.
-    if (entry.ids.size > 64) entry.ids.delete(entry.ids.values().next().value!);
-    this.owned.set(parsed.sig, entry);
+    for (const [sig, ids] of this.owned) {
+      for (const [id, exp] of ids) if (exp <= now) ids.delete(id);
+      if (!ids.size) this.owned.delete(sig);
+    }
+    const ids = this.owned.get(parsed.sig) ?? new Map<string, number>();
+    ids.delete(ptyId);
+    ids.set(ptyId, Math.min(parsed.exp, now + OWN_MS));
+    // ponytail: teto simples por token (os mais antigos saem primeiro); terminais já fechados ficam até vencer.
+    if (ids.size > 64) ids.delete(ids.keys().next().value!);
+    this.owned.set(parsed.sig, ids);
     return true;
   }
 
   /** O terminal `ptyId` foi aberto, assumido ou ligado por este token com a senha recente. */
   owns(token: string | undefined, ptyId: string): boolean {
     const parsed = this.parse(token);
-    return !!parsed && !this.revoked.has(parsed.sig) && !!this.owned.get(parsed.sig)?.ids.has(ptyId);
+    if (!parsed || this.revoked.has(parsed.sig)) return false;
+    const exp = this.owned.get(parsed.sig)?.get(ptyId);
+    return exp !== undefined && this.now() < exp;
   }
 
   private markConfirmed(sig: string): void {

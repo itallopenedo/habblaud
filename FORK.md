@@ -21,12 +21,30 @@ Neste Mac o Habblaud roda como serviço do macOS, não no Docker (o terminal int
 
     npm run native:install     # build + LaunchAgent com.pnd.habblaud (KeepAlive, HABBLAUD_PTY=1); também serve para atualizar
     npm run native:status      # serviço, versão e se o terminal interativo está ligado
-    npm run native:uninstall   # tira o serviço (para voltar ao Docker: npm run docker:up)
+    npm run native:uninstall   # tira o serviço
 
-O serviço lê o mesmo `.env` do projeto (`node --env-file-if-exists`); logs em `~/.habblaud/logs/habblaud.log` e
-`habblaud.error.log`. Não rode o Docker e o serviço ao mesmo tempo (mesma porta). Dados: `~/.habblaud` (no Docker, o
-volume `habblaud_habblaud-data`; a migração copiou o volume para `~/.habblaud` e deixou um backup em
-`~/.habblaud/docker-data-backup-<data>`). O `npm run codex:bridge` não é necessário no modo nativo.
+Rode o `native:install` de dentro de `~/habblaud`, com o Node que o serviço deve usar: o projeto do serviço é a pasta
+do próprio script (rodar de um worktree aponta o serviço para o worktree) e o plist grava o caminho real desse Node.
+A troca (bootout, esperar o serviço sumir, bootstrap) roda num processo à parte, e o instalador só dá sucesso quando
+responde um Habblaud que subiu depois da reinstalação. Por isso dá para rodar pelo terminal interativo do próprio
+Habblaud: o terminal fecha quando o servidor cai, mas a reinstalação segue sozinha; confira depois com
+`npm run native:status` (não testado ao vivo ainda). Para só reiniciar, sem mudar o plist:
+
+    launchctl kickstart -k gui/$(id -u)/com.pnd.habblaud
+
+Apagar a versão do Node do fnm usada no plist (`fnm uninstall`) quebra o serviço: rode `npm run native:install` de
+novo com a versão nova.
+
+O serviço lê o mesmo `.env` do projeto (`node --env-file-if-exists`), e a senha (hash) e os usuários do acesso remoto
+saem do ambiente logo ao iniciar (os terminais e agentes abertos pelo Habblaud não os herdam); logs em
+`~/.habblaud/logs/habblaud.log` e `habblaud.error.log`. Não rode o Docker e o serviço ao mesmo tempo (mesma porta).
+Dados: `~/.habblaud` (no Docker, o volume `habblaud_habblaud-data`; a migração, quando for feita, vai copiar o volume
+para `~/.habblaud` e deixar um backup em `~/.habblaud/docker-data-backup-<data>`). O `npm run codex:bridge` não é
+necessário no modo nativo (a migração vai desligar o `com.pnd.habblaud-codex-bridge`).
+
+Voltar ao Docker: `npm run native:uninstall`, religar o auxiliar
+(`launchctl enable gui/$(id -u)/com.pnd.habblaud-codex-bridge` e
+`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.pnd.habblaud-codex-bridge.plist`) e `npm run docker:up`.
 
 ## Terminal interativo no iPhone (só pela tailnet)
 
@@ -37,10 +55,11 @@ No `.env`: `HABBLAUD_TAILNET_USER=<login do Tailscale>` e `pty` em `HABBLAUD_REM
 
 No iPhone: `https://<mac>.<tailnet>.ts.net:8443` (o mesmo login da 443). Abrir, assumir ou encerrar um terminal pede a
 senha de novo quando a última conferência passou de 10 min; sem a senha recente, digitar e fechar só valem nos
-terminais que a mesma sessão abriu ou ligou. Pela rede local (4748) o terminal interativo continua recusado.
+terminais que a mesma sessão abriu ou ligou, por até 12 h depois disso. Pela rede local (4748) o terminal interativo continua recusado.
 
 O que protege: a 4749 só escuta no `127.0.0.1` (ninguém da rede a alcança); toda requisição precisa do cabeçalho
 `Tailscale-User-Login` igual a `HABBLAUD_TAILNET_USER` (o `tailscale serve` põe o do usuário da tailnet e descarta o
-que vier do cliente), do login remoto (as mesmas sessões e o mesmo freio de senha da 4748) e de `pty` liberado; as
+que vier do cliente), do login remoto (as mesmas sessões da 4748, com freio de senha próprio: erros na rede local não travam a 8443) e de
+`pty` liberado; pedidos pelo Funnel (cabeçalho `Tailscale-Funnel-Request`) são recusados; as
 rotas só do computador (`/api/host/*`, hooks, World) seguem recusadas. Limite conhecido: um processo do próprio Mac
 consegue imitar o cabeçalho, mas ainda precisa do login, de `pty` e da senha recente, e esse processo já teria a 4747.

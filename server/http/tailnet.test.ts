@@ -1,10 +1,10 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { setQuiet } from '../log';
-import { createTailnetGate, DEFAULT_TAILNET_PORT, isTailnetRequest, parseTailnetConfig, ptyRemoteNeeds, startTailnetListener } from './tailnet';
+import { createTailnetGate, createTailnetRemoteGate, DEFAULT_TAILNET_PORT, isTailnetRequest, parseTailnetConfig, ptyRemoteNeeds, startTailnetListener } from './tailnet';
 import { AccountsService } from '../accounts/service';
 import { NameStore } from '../model/names';
 import { Office } from '../model/office';
@@ -14,7 +14,7 @@ import { tempDir } from '../test/fixtures';
 import { createApiHandler, sendJson } from './app';
 import { createRequestGuard } from './guard';
 import { createPtyRoutes } from './pty';
-import { CONFIRM_MS, COOKIE, createRemoteGate, isRemoteRequest, LoginThrottle, readCookie, RemoteSessions, type RemoteFeature } from './remote';
+import { CONFIRM_MS, COOKIE, createRemoteGate, isRemoteRequest, LoginThrottle, readCookie, RemoteSessions, type RemoteConfig, type RemoteFeature } from './remote';
 import { Hub } from './sse';
 import { TerminalStreams } from './terminal';
 
@@ -72,6 +72,8 @@ describe('porta da tailnet: escuta e cabeçalho do Tailscale', () => {
     expect(await status({ 'Tailscale-User-Login': 'bob@example.com' })).toBe(403);
     expect(await status({ 'Tailscale-User-Login': '' })).toBe(403);
     expect(await status({ 'Tailscale-User-Login': 'Ana@Example.com' })).toBe(200);
+    // Pelo Funnel (internet pública), nunca, mesmo com o usuário certo.
+    expect(await status({ 'Tailscale-User-Login': 'ana@example.com', 'Tailscale-Funnel-Request': '?1' })).toBe(403);
     expect(marked).toEqual([true]);
   });
 
@@ -108,7 +110,10 @@ const CFG = { user: 'ana', passwordHash: parsePasswordHash(HASH_TEXT)!, password
 const TS_HOST = 'mac.tail.ts.net:8443';
 const TS = { Host: TS_HOST, 'Tailscale-User-Login': 'ana@example.com' };
 
-/** Porta do celular na rede (LAN) e porta da tailnet sobre a MESMA API, sessões e freio, como no server/index.ts. */
+/**
+ * Porta do celular na rede (LAN) e porta da tailnet sobre a MESMA API e as mesmas sessões, como no server/index.ts; o
+ * freio do login é um por porta (o da tailnet vem de createTailnetRemoteGate).
+ */
 /** PtyManager de mentira para o roteador de verdade (createPtyRoutes): m1 e m2 foram abertos no Mac. */
 function fakePtys(calls: string[]): PtyManager {
   const known = new Set(['m1', 'm2']);
@@ -144,7 +149,7 @@ function fakePtys(calls: string[]): PtyManager {
   } as unknown as PtyManager;
 }
 
-async function start(allow: RemoteFeature[], opts: { realPty?: boolean } = {}) {
+async function start(allow: RemoteFeature[], opts: { realPty?: boolean; caFile?: string } = {}) {
   let clock = Date.now();
   const tmp = tempDir();
   const dir = join(tmp.dir, '.claude');
@@ -189,8 +194,10 @@ async function start(allow: RemoteFeature[], opts: { realPty?: boolean } = {}) {
     },
   });
   const guard = createRequestGuard({ allowedHosts: new Set(['mac.tail.ts.net']) });
-  const lanGate = createRemoteGate({ config: CFG, sessions, secure: false, throttle });
-  const tsGate = createRemoteGate({ config: CFG, sessions, secure: true, throttle });
+  const lanGate = createRemoteGate({ config: CFG, sessions, secure: false, throttle, caFile: opts.caFile });
+  // Como no index.ts: a configuração remota inteira (com a CA da rede local, se houver).
+  const remote: Pick<RemoteConfig, 'user' | 'passwordHash' | 'tls'> = { ...CFG, tls: opts.caFile ? { dir: '', keyFile: '', certFile: '', caFile: opts.caFile } : undefined };
+  const tsGate = createTailnetRemoteGate(remote, sessions);
   const tailnetGate = createTailnetGate({ user: 'ana@example.com' });
   const page = (res: http.ServerResponse) => {
     res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -364,6 +371,30 @@ describe('terminal interativo: LAN x tailnet', () => {
     expect(ts.setCookie).toMatch(/SameSite=Strict/);
     const lan = await login(s.lanBase);
     expect((await request(s.tsBase, '/api/snapshot', { headers: { ...TS, Cookie: lan.cookie } })).status).toBe(200);
+  });
+
+  it('freio próprio na tailnet: senhas erradas na LAN (4748) não travam a senha de novo pela tailnet', async () => {
+    const s = await start(['permissions', 'terminal', 'pty']);
+    const { cookie } = await login(s.tsBase, TS);
+    const h = { ...TS, Cookie: cookie };
+    s.advance(CONFIRM_MS + 1);
+    let lan = 0;
+    for (let i = 0; i < 8 && lan !== 429; i++) {
+      lan = (await request(s.lanBase, '/api/remote/login', { method: 'POST', body: { user: 'ana', password: 'errada' } })).status;
+    }
+    expect(lan).toBe(429);
+    expect((await request(s.tsBase, '/api/remote/confirm', { method: 'POST', body: { password: PASSWORD }, headers: h })).status).toBe(200);
+  });
+
+  it('tailnet: sem o link nem o download da CA da rede local (o certificado do .ts.net é público)', async () => {
+    const tmp = tempDir();
+    const caFile = join(tmp.dir, 'ca.crt');
+    writeFileSync(caFile, '-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n');
+    closers.push(async () => tmp.cleanup());
+    const s = await start(['permissions'], { caFile });
+    expect((await request(s.lanBase, '/login')).body).toContain('/remote/ca.crt');
+    expect((await request(s.tsBase, '/login', { headers: TS })).body).not.toContain('/remote/ca.crt');
+    expect((await request(s.tsBase, '/remote/ca.crt', { headers: TS })).status).toBe(404);
   });
 
   it('tailnet: Origin de outro site é barrado pelo guard antes de tudo', async () => {

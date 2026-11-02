@@ -9,7 +9,7 @@
 // Um processo do próprio Mac consegue imitar o cabeçalho, mas ainda precisa da senha, e esse processo já teria a 4747.
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { tr } from '../../shared/i18n';
-import { safeEqual } from './remote';
+import { createRemoteGate, LoginThrottle, safeEqual, type RemoteConfig, type RemoteSessions } from './remote';
 
 export const DEFAULT_TAILNET_PORT = 4749;
 export const TAILNET_HOST = '127.0.0.1';
@@ -41,7 +41,9 @@ export function createTailnetGate(cfg: Pick<TailnetConfig, 'user'>): (req: Incom
   return (req, res) => {
     const raw = req.headers['tailscale-user-login'];
     const login = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
-    if (login && safeEqual(login, cfg.user)) {
+    // Pelo Funnel (a internet pública), nunca: só a tailnet do dono.
+    const funnel = req.headers['tailscale-funnel-request'] !== undefined;
+    if (login && !funnel && safeEqual(login, cfg.user)) {
       tailnetRequests.add(req);
       return false;
     }
@@ -56,6 +58,17 @@ export function createTailnetGate(cfg: Pick<TailnetConfig, 'user'>): (req: Incom
     res.end(body);
     return true;
   };
+}
+
+/**
+ * O login da porta da tailnet: as mesmas sessões da 4748, mas com freio próprio (senhas erradas de qualquer aparelho da
+ * rede local não travam a senha de novo pelo celular aqui) e sem o download da CA (o certificado do .ts.net é público).
+ */
+export function createTailnetRemoteGate(
+  remote: Pick<RemoteConfig, 'user' | 'passwordHash'>,
+  sessions: RemoteSessions,
+): (req: IncomingMessage, res: ServerResponse, url: URL) => boolean {
+  return createRemoteGate({ config: remote, sessions, secure: true, caFile: undefined, throttle: new LoginThrottle() });
 }
 
 export function startTailnetListener(

@@ -2,9 +2,10 @@
 // do Docker: `node --env-file-if-exists=<projeto>/.env dist/server/index.js`, com KeepAlive, o Node absoluto de quem
 // instalou (o caminho real, não o atalho temporário do fnm), HABBLAUD_PTY=1 (terminal interativo) e logs em
 // ~/.habblaud/logs/. O .env é lido pelo próprio Node a cada início: senha e opções não vão para o plist. Atualizar =
-// rodar native:install de novo (faz o build e reinicia). O Docker continua funcionando (npm run docker:up); só não
-// rode os dois ao mesmo tempo (a porta é a mesma).
-import { spawnSync } from 'node:child_process';
+// rodar native:install de novo (faz o build e reinicia). A troca (bootout, esperar sumir, bootstrap) roda num processo
+// à parte (reloadCommand), que sobrevive ao servidor cair e ao terminal do próprio Habblaud fechar. O Docker continua
+// funcionando (npm run docker:up); só não rode os dois ao mesmo tempo (a porta é a mesma).
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -16,7 +17,7 @@ import { tr } from '../shared/i18n';
 export const SERVICE_LABEL = 'com.pnd.habblaud';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = process.env.HOME || homedir();
-const WAIT_S = 30;
+const WAIT_S = 40;
 
 export interface ServiceSpec {
   /** Pasta do projeto (package.json, .env e dist/). */
@@ -51,6 +52,9 @@ export function renderPlist(spec: ServiceSpec): string {
     ['PATH', servicePath(spec)],
     ['HOME', spec.home],
     ['HABBLAUD_PTY', '1'],
+    // O launchd começa no locale C: sem isto o terminal interativo perde acentos e emojis.
+    ['LANG', 'en_US.UTF-8'],
+    ['LC_CTYPE', 'en_US.UTF-8'],
   ];
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -77,6 +81,49 @@ export function parseLaunchctlPrint(text: string): { running: boolean; pid?: num
   const state = /^\s*state = (\S+)/m.exec(text)?.[1];
   const pid = Number(/^\s*pid = (\d+)/m.exec(text)?.[1]);
   return { running: state === 'running', ...(Number.isInteger(pid) && pid > 0 ? { pid } : {}) };
+}
+
+/**
+ * Troca o serviço num shell à parte: bootout, espera o `launchctl print` falhar (até `tries` × 0,5 s) e bootstrap, com
+ * até 3 tentativas (logo depois do bootout ele às vezes dá "Bootstrap failed: 5: Input/output error"). Os erros do
+ * bootstrap vão para `errLog`. Argumentos posicionais: nenhum caminho passa pela interpretação do shell.
+ */
+export function reloadCommand(domain: string, plist: string, errLog: string, tries = 20): [string, string[]] {
+  const script = [
+    `launchctl bootout "$1/${SERVICE_LABEL}" >/dev/null 2>&1`,
+    'i=0',
+    `while [ "$i" -lt "$4" ] && launchctl print "$1/${SERVICE_LABEL}" >/dev/null 2>&1; do i=$((i+1)); sleep 0.5; done`,
+    'n=0',
+    'until launchctl bootstrap "$1" "$2" >/dev/null 2>>"$3"; do n=$((n+1)); [ "$n" -ge 3 ] && exit 1; sleep 1; done',
+  ].join('\n');
+  return ['/bin/sh', ['-c', script, 'habblaud-reload', domain, plist, errLog, String(tries)]];
+}
+
+/**
+ * Espera o Habblaud que subiu depois de `since` (o `meta.startedAt` de quem responde na porta): o servidor antigo, ainda
+ * de pé, ou outro processo na mesma porta não contam como sucesso.
+ */
+export async function waitForRestart(
+  deps: { startedAt: () => Promise<number | undefined>; sleep: (ms: number) => Promise<void> },
+  since: number,
+  waitS: number,
+): Promise<boolean> {
+  for (let i = 0; i < waitS; i++) {
+    const at = await deps.startedAt();
+    if (at !== undefined && at >= since) return true;
+    await deps.sleep(1_000);
+  }
+  return false;
+}
+
+async function startedAtOn(port: number): Promise<number | undefined> {
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/api/snapshot`, { signal: AbortSignal.timeout(2_000) });
+    const at = r.ok ? ((await r.json()) as { meta?: { startedAt?: unknown } }).meta?.startedAt : undefined;
+    return typeof at === 'number' ? at : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 interface Health {
@@ -140,20 +187,17 @@ async function install(): Promise<number> {
   mkdirSync(dirname(logs.out), { recursive: true });
   mkdirSync(dirname(plistFile(HOME)), { recursive: true });
   writeFileSync(plistFile(HOME), renderPlist(spec), { mode: 0o644 });
-  launchctl('bootout', `${target()}/${SERVICE_LABEL}`);
-  const r = launchctl('bootstrap', target(), plistFile(HOME));
-  if (r.status !== 0) {
-    console.error(tr('não consegui ligar o serviço: {0}', [String(r.stderr).trim()]));
-    return 1;
-  }
+  // Num processo à parte (sessão própria): o bootout derruba o servidor e, rodando no terminal do próprio Habblaud, este
+  // processo junto; o bootstrap acontece mesmo assim.
+  const since = Date.now();
+  const [cmd, args] = reloadCommand(target(), plistFile(HOME), logs.err);
+  spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
   console.log(tr('Serviço {0} instalado ({1}). Esperando o Habblaud em http://127.0.0.1:{2}…', [SERVICE_LABEL, plistFile(HOME), port]));
-  for (let i = 0; i < WAIT_S; i++) {
+  const sleep = (ms: number) => new Promise<void>((ok) => setTimeout(ok, ms));
+  if (await waitForRestart({ startedAt: () => startedAtOn(port), sleep }, since, WAIT_S)) {
     const h = await health(port);
-    if (h && !h.docker) {
-      console.log(tr('Habblaud {0} no ar; terminal interativo: {1}. Log: {2}', [h.version ?? '?', h.pty ? tr('ligado') : tr('desligado (veja o log)'), logs.out]));
-      return 0;
-    }
-    await new Promise((ok) => setTimeout(ok, 1_000));
+    console.log(tr('Habblaud {0} no ar; terminal interativo: {1}. Log: {2}', [h?.version ?? '?', h?.pty ? tr('ligado') : tr('desligado (veja o log)'), logs.out]));
+    return 0;
   }
   console.error(tr('O Habblaud não respondeu em {0} s: veja {1}', [WAIT_S, logs.err]));
   return 1;
