@@ -9,6 +9,7 @@
 // testado em ui/terminal.test.ts; a montagem usa só textContent (o markdown das respostas vem de ui/markdown.ts).
 // Sessão do Codex: selo "Codex" no cabeçalho e um spinner neutro no rodapé (o ✻ é do Claude Code).
 import type { AgentInfo, Provider, RecentSession, TerminalEntry, TerminalImage, TerminalInit } from '../../../shared/types';
+import { chatRuns, runLabel } from './chatruns';
 import { MessageComposer } from './composer';
 import type { UiComponent, UiContext } from './context';
 import { copyText, h, iconButton, prefersReducedMotion, setAttr, setHidden, setText, setTitle, setVariant } from './dom';
@@ -17,6 +18,7 @@ import { ICONS } from './icons';
 import { maximizeButton, Movable } from './movable';
 import { access } from '../net/access';
 import { PermissionCard } from './permission';
+import { safeLocalStorage } from './prefs';
 import type { PtyControl } from './pty';
 import { TermActions } from './termactions';
 import { TermTabs } from './termtabs';
@@ -57,6 +59,8 @@ const SEARCH_DEBOUNCE_MS = 120;
 /** "Copiado" fica à mostra por este tempo. */
 const COPIED_MS = 1_500;
 const dayFmt = new Intl.DateTimeFormat(intlLocale(), { day: '2-digit', month: 'short' });
+/** Modo da conversa escolhido neste aparelho ('chat' ou 'terminal'); sem escolha, chat na tela estreita. */
+const VIEW_KEY = 'habblaud.term.view';
 
 /** Distância do fim (px) que ainda conta como "no fim" para seguir as mensagens novas. */
 const STICK_PX = 32;
@@ -674,6 +678,16 @@ export class TerminalPanel implements UiComponent, TerminalControl {
   /** Linhas que aparecem com o filtro atual. */
   private visibleRows = 0;
 
+  /** Modo chat: bolhas e ferramentas recolhidas em grupos (ui/chatruns.ts); senão, o formato do Claude Code. */
+  private chat: boolean;
+  private viewBtns: HTMLButtonElement[] = [];
+  /** Botão "Usou N ferramentas" de cada grupo, pela chave do primeiro item. */
+  private runEls = new Map<string, HTMLElement>();
+  /** Grupos abertos (pela chave do primeiro item). */
+  private openRuns = new Set<string>();
+  /** Grupo de cada item recolhível (para a busca abrir o grupo de um resultado). */
+  private runOf = new Map<string, string>();
+
   private searchOpen = false;
   /** Termo da busca já dobrado (minúsculas, sem acentos); '' = sem busca. */
   private folded = '';
@@ -725,6 +739,13 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.tabs = new TermTabs(ctx);
     const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
     const findKey = mac ? '⌘F' : 'Ctrl+F';
+    let saved: string | null = null;
+    try {
+      saved = safeLocalStorage()?.getItem(VIEW_KEY) ?? null;
+    } catch {
+      // Sem armazenamento: vale o padrão.
+    }
+    this.chat = saved ? saved === 'chat' : ctx.isNarrow();
     const icon = h('span', { class: 'ui-term__icon', attrs: { 'aria-hidden': 'true' } });
     icon.innerHTML = ICONS.terminal;
     this.kindEl = h('span', { class: 'ui-term__kind', text: 'terminal' });
@@ -789,7 +810,24 @@ export class TerminalPanel implements UiComponent, TerminalControl {
       iconButton(ICONS.chevronDown, tr('Próximo resultado (Enter)'), () => this.go(1), 'ui-icon-btn--sm ui-term__step'),
       iconButton(ICONS.close, tr('Fechar a busca (Esc)'), () => this.closeSearch(true), 'ui-icon-btn--sm ui-term__step'),
     );
-    const tools = h('div', { class: 'ui-term__tools' }, filters, this.searchBox);
+    const views = h('div', { class: 'ui-seg ui-term__filter ui-term__view', role: 'radiogroup', attrs: { 'aria-label': tr('Modo da conversa') } });
+    for (const [chat, text, hint] of [
+      [true, tr('Chat'), tr('Conversa em bolhas, com as ferramentas recolhidas')],
+      [false, tr('Terminal'), tr('Conversa no formato do Claude Code')],
+    ] as const) {
+      const b = h('button', { class: 'ui-seg__opt', type: 'button', role: 'radio', text, title: hint, attrs: { 'aria-checked': 'false' } });
+      b.addEventListener('click', () => this.setView(chat));
+      b.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        e.preventDefault();
+        e.stopPropagation();
+        this.setView(!chat);
+        this.viewBtns[chat ? 1 : 0].focus();
+      });
+      this.viewBtns.push(b);
+      views.append(b);
+    }
+    const tools = h('div', { class: 'ui-term__tools' }, views, filters, this.searchBox);
 
     const retry = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Tentar de novo'), on: { click: () => this.connect() } });
     this.alertText = h('span', { class: 'ui-term__alert-text', text: OPEN_ERROR });
@@ -838,6 +876,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     // Arrastar pela barra solta a janela (ui/movable.ts).
     this.movable = new Movable(this.el, bar, { key: 'habblaud.move.term', enabled: () => !ctx.isNarrow() });
     this.renderFilter();
+    this.renderView();
     // Janela redimensionada: quem está no fim continua vendo o fim.
     if (typeof ResizeObserver === 'function') new ResizeObserver(() => this.follow && this.scrollToEnd()).observe(this.scroll);
   }
@@ -1138,6 +1177,9 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.current = null;
     this.currentEl = null;
     this.visibleRows = 0;
+    this.runEls.clear();
+    this.openRuns.clear();
+    this.runOf.clear();
     this.list.replaceChildren();
   }
 
@@ -1209,16 +1251,95 @@ export class TerminalPanel implements UiComponent, TerminalControl {
 
   /** Mostra ou esconde cada linha conforme o filtro ("Só prompts" depende do que vem depois de cada resposta). */
   private applyFilter(): void {
-    const finals = this.filter === 'prompts' ? finalAnswerKeys(this.log.values()) : NO_FINALS;
+    // O chat não tem filtro: as ferramentas já ficam recolhidas nos grupos.
+    const filter = this.chat ? 'all' : this.filter;
+    const finals = filter === 'prompts' ? finalAnswerKeys(this.log.values()) : NO_FINALS;
     let visible = 0;
     for (const item of this.log.values()) {
       const el = this.rows.get(item.key);
       if (!el) continue;
-      const show = itemVisible(item, this.filter, finals);
+      const show = itemVisible(item, filter, finals);
       el.classList.toggle('is-filtered', !show);
       if (show) visible++;
     }
     this.visibleRows = visible;
+    this.regroup();
+  }
+
+  // ---------------------------------------------------------------- modo chat
+
+  private setView(chat: boolean): void {
+    if (chat === this.chat) return;
+    this.chat = chat;
+    try {
+      safeLocalStorage()?.setItem(VIEW_KEY, chat ? 'chat' : 'terminal');
+    } catch {
+      // Sem armazenamento: a escolha vale só até recarregar.
+    }
+    this.renderView();
+    this.applyFilter();
+    if (this.folded) {
+      this.markCurrent(false);
+      this.renderSearch();
+    }
+    if (this.follow) this.scrollToEnd();
+    this.renderState();
+  }
+
+  private renderView(): void {
+    this.el.classList.toggle('is-chat', this.chat);
+    this.viewBtns.forEach((b, i) => {
+      const on = (i === 0) === this.chat;
+      setAttr(b, 'aria-checked', String(on));
+      b.tabIndex = on ? 0 : -1;
+    });
+  }
+
+  /** Recolhe as ferramentas entre duas mensagens num botão "Usou N ferramentas" (no terminal, desfaz os grupos). */
+  private regroup(): void {
+    const runs = this.chat ? chatRuns(this.log.values()) : [];
+    const live = new Set(runs.map((r) => r.key));
+    for (const [key, el] of this.runEls) {
+      if (live.has(key)) continue;
+      el.remove();
+      this.runEls.delete(key);
+    }
+    for (const key of this.openRuns) if (!live.has(key)) this.openRuns.delete(key);
+    this.runOf.clear();
+    for (const el of this.rows.values()) el.classList.remove('in-run', 'is-folded');
+    for (const run of runs) {
+      const open = this.openRuns.has(run.key);
+      for (const key of run.keys) {
+        this.runOf.set(key, run.key);
+        const el = this.rows.get(key);
+        el?.classList.add('in-run');
+        el?.classList.toggle('is-folded', !open);
+      }
+      const first = this.rows.get(run.key);
+      if (!first) continue;
+      let btn = this.runEls.get(run.key);
+      if (!btn) {
+        btn = h('button', { class: 'ui-chat__run', type: 'button', on: { click: () => this.toggleRun(run.key) } });
+        this.runEls.set(run.key, btn);
+      }
+      if (first.previousElementSibling !== btn) first.before(btn);
+      btn.classList.toggle('is-running', !!run.running);
+      setAttr(btn, 'aria-expanded', String(open));
+      setText(btn, runLabel(run));
+    }
+  }
+
+  private toggleRun(key: string): void {
+    if (!this.openRuns.delete(key)) this.openRuns.add(key);
+    this.regroup();
+  }
+
+  /** A busca chegou num item recolhido: abre o grupo dele. */
+  private revealRun(itemKey: string): void {
+    const run = this.runOf.get(itemKey);
+    if (!this.chat || !run || this.openRuns.has(run)) return;
+    this.openRuns.add(run);
+    this.regroup();
   }
 
   // ---------------------------------------------------------------- busca
@@ -1354,6 +1475,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     const index = Math.min(ref.index, spans.length - 1);
     const span = spans[index];
     this.current = { key: ref.key, index };
+    this.revealRun(ref.key);
     revealWithin(span, el);
     span.classList.add('is-current');
     this.currentEl = span;
