@@ -180,12 +180,12 @@ export function sendJson(res: ServerResponse, status: number, body: unknown): vo
  * Anexo de entrega. Páginas e SVG vêm numa sandbox sem scripts (CSP), para não rodarem com o login do escritório;
  * PDF e imagens podem abrir dentro do modal (mesma origem).
  */
-function sendFile(res: ServerResponse, data: Buffer, type: string, name: string): void {
+function sendFile(res: ServerResponse, data: Buffer, type: string, name: string, cache = 'private, max-age=300'): void {
   const active = /^text\/html|^image\/svg/.test(type);
   res.writeHead(200, {
     'Content-Type': type,
     'Content-Length': data.length,
-    'Cache-Control': 'private, max-age=300',
+    'Cache-Control': cache,
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'SAMEORIGIN',
     'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(name)}`,
@@ -738,8 +738,9 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           const type = p ? fileType(p) : undefined;
           if (!p || !type) sendJson(res, 404, { error: tr('arquivo desconhecido: atualize a lista') });
           else
-            files.get(p).then(
-              (r) => ('data' in r ? sendFile(res, r.data, type.type, p.split('/').pop() || 'arquivo') : sendJson(res, r.status, { error: r.error })),
+            // O agente reescreve estes arquivos: sempre a versão atual do disco (sem cache aqui nem no navegador).
+            files.get(p, { fresh: true }).then(
+              (r) => ('data' in r ? sendFile(res, r.data, type.type, p.split('/').pop() || 'arquivo', 'no-store') : sendJson(res, r.status, { error: r.error })),
               (err) => fail(res, err),
             );
         }

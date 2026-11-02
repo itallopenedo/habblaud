@@ -1,6 +1,6 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AccountsService } from '../accounts/service';
@@ -9,7 +9,7 @@ import { NameStore } from '../model/names';
 import { Office } from '../model/office';
 import { AgentFiles } from '../deliveries/agent-files';
 import { FileFetcher } from '../deliveries/fetcher';
-import { L, tempDir, writeLines } from '../test/fixtures';
+import { L, symlinkOrSkip, tempDir, writeLines } from '../test/fixtures';
 import { createApiHandler, sendJson, type ApiDeps } from './app';
 import { createRequestGuard, isLoopbackHost } from './guard';
 import {
@@ -545,6 +545,45 @@ describe('porta remota', () => {
     const h = await start();
     const r = await request(h.remoteBase, '/api/remote/login', { method: 'POST', headers: { Origin: 'http://evil.example' }, body: CREDS });
     expect(r.status).toBe(403);
+  });
+
+  it('aba Arquivos: o arquivo aberto é sempre a versão atual (nada de cache) e a checagem real recusa o que é protegido', async (ctx) => {
+    const tmp = tempDir();
+    try {
+      mkdirSync(join(tmp.dir, 'docs'));
+      mkdirSync(join(tmp.dir, '.ssh'));
+      const doc = join(tmp.dir, 'docs', 'relatorio.md');
+      writeFileSync(doc, 'versao 1');
+      writeFileSync(join(tmp.dir, '.ssh', 'notas.md'), 'segredo');
+      symlinkOrSkip(ctx.skip, join(tmp.dir, '.ssh', 'notas.md'), join(tmp.dir, 'docs', 'atalho.md'));
+      const transcript = join(tmp.dir, 't.jsonl');
+      writeLines(transcript, [
+        L.assistant([L.tool('w1', 'Write', { file_path: doc, content: 'x' })]),
+        L.assistant([L.tool('w2', 'Write', { file_path: join(tmp.dir, 'docs', 'atalho.md'), content: 'x' })]),
+      ]);
+      const s = await start(['terminal'], {
+        agentFiles: new AgentFiles({ transcriptPathOf: () => transcript, cwdOf: () => tmp.dir }),
+        files: new FileFetcher({ direct: true }),
+      });
+      const cookie = await login(s.remoteBase);
+      const headers = { Cookie: cookie };
+      const { files } = JSON.parse((await request(s.remoteBase, '/api/agents/a1/files', { headers })).body);
+      const idOf = (name: string) => files.find((f: { name: string }) => f.name === name).id;
+      const first = await request(s.remoteBase, `/api/agents/a1/files/${idOf('relatorio.md')}`, { headers });
+      expect([first.status, first.body]).toEqual([200, 'versao 1']);
+      expect(first.headers['cache-control']).toBe('no-store');
+      writeFileSync(doc, 'versao 2, maior');
+      const second = await request(s.remoteBase, `/api/agents/a1/files/${idOf('relatorio.md')}`, { headers });
+      expect([second.status, second.body]).toEqual([200, 'versao 2, maior']);
+      // O atalho parece um .md comum no caminho, mas aponta para dentro de .ssh: a checagem real, na hora de abrir, recusa.
+      const link = await request(s.remoteBase, `/api/agents/a1/files/${idOf('atalho.md')}`, { headers });
+      expect(link.status).toBe(403);
+      expect(link.body).not.toContain('segredo');
+      rmSync(doc);
+      expect((await request(s.remoteBase, `/api/agents/a1/files/${idOf('relatorio.md')}`, { headers })).status).toBe(404);
+    } finally {
+      tmp.cleanup();
+    }
   });
 
   it('aba Arquivos: só com terminal liberado; lista e abre pelo id, nunca pelo caminho', async () => {

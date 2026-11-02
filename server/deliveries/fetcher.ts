@@ -49,7 +49,9 @@ export class FileFetcher {
     return this.host.present();
   }
 
-  async get(path: string): Promise<FetchResult> {
+  /** `fresh`: ignora e descarta a cópia em cache e lê de novo (arquivos que o agente reescreve; as entregas não usam). */
+  async get(path: string, opts: { fresh?: boolean } = {}): Promise<FetchResult> {
+    if (opts.fresh) this.forget(path);
     const hit = this.cache.get(path);
     if (hit) {
       this.cache.delete(path);
@@ -124,8 +126,16 @@ export class FileFetcher {
     }
   }
 
+  private forget(path: string): void {
+    const old = this.cache.get(path);
+    if (!old) return;
+    this.cache.delete(path);
+    this.cacheBytes -= old.length;
+  }
+
   private remember(path: string, data: Buffer): void {
     if (data.length > CACHE_MAX_BYTES / 4) return;
+    this.forget(path);
     this.cache.set(path, data);
     this.cacheBytes += data.length;
     for (const [k, v] of this.cache) {

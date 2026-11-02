@@ -4,6 +4,20 @@ import { FileFetcher, HOST_PRESENCE_MS } from './fetcher';
 const ok = (p: string) => ({ path: p, size: 3 });
 
 describe('FileFetcher', () => {
+  it('fresh: relê o arquivo e troca a cópia em cache; sem fresh, as entregas seguem no cache', async () => {
+    let content = 'v1';
+    let reads = 0;
+    const f = new FileFetcher({ direct: true, check: ok, read: () => (reads++, Buffer.from(content)) });
+    expect(await f.get('/a/x.md')).toEqual({ data: Buffer.from('v1') });
+    content = 'v2';
+    expect(await f.get('/a/x.md')).toEqual({ data: Buffer.from('v1') });
+    expect(await f.get('/a/x.md', { fresh: true })).toEqual({ data: Buffer.from('v2') });
+    expect(await f.get('/a/x.md')).toEqual({ data: Buffer.from('v2') });
+    expect(reads).toBe(2);
+    const gone = new FileFetcher({ direct: true, check: () => ({ error: 'arquivo não encontrado' }), read: () => Buffer.from('x') });
+    expect(await gone.get('/a/y.md', { fresh: true })).toMatchObject({ status: 404 });
+  });
+
   it('Node: lê direto do disco, com a checagem', async () => {
     const f = new FileFetcher({ direct: true, check: ok, read: () => Buffer.from('abc') });
     expect(await f.get('/a/x.png')).toEqual({ data: Buffer.from('abc') });

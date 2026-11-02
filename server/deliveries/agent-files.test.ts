@@ -1,4 +1,5 @@
 // Aba Arquivos: o que o agente escreveu ou editou na sessão, lido do transcript (linhas sintéticas).
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { L, tempDir, writeLines } from '../test/fixtures';
@@ -60,6 +61,21 @@ describe('aba Arquivos: o que o agente escreveu', () => {
       const list = new AgentFiles({ transcriptPathOf: () => file, cwdOf: () => '/p/loja' }).list('a1')!;
       expect(list).toHaveLength(MAX_AGENT_FILES);
       expect(list[0].name).toBe(`r${MAX_AGENT_FILES + 9}.md`);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it('transcript ilegível na releitura: a lista vem vazia, mas os ids da última boa continuam abrindo', () => {
+    const tmp = tempDir();
+    try {
+      const file = join(tmp.dir, 't.jsonl');
+      writeLines(file, [wrote('/p/loja/docs/relatorio.md', T0)]);
+      const files = new AgentFiles({ transcriptPathOf: () => file, cwdOf: () => '/p/loja' });
+      const [first] = files.list('a1')!;
+      rmSync(file);
+      expect(files.list('a1')).toEqual([]);
+      expect(files.path('a1', first.id)).toBe('/p/loja/docs/relatorio.md');
     } finally {
       tmp.cleanup();
     }

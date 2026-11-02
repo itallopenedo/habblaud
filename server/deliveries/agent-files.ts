@@ -61,16 +61,18 @@ export class AgentFiles {
     const transcript = this.opts.transcriptPathOf(agentId);
     if (!transcript) return undefined;
     const lines: string[] = [];
+    let readable = true;
     try {
       const tail = new FileTail(transcript);
       tail.seekTail(FILES_TAIL_BYTES);
       for (let i = 0; i < 64; i++) {
         const r = tail.read();
+        if (r.missing) readable = false;
         lines.push(...r.lines);
         if (!r.more) break;
       }
     } catch {
-      // Transcript ilegível agora: lista vazia.
+      readable = false;
     }
     const cwd = this.opts.cwdOf(agentId)?.replace(/\/+$/, '');
     const ids = new Map<string, string>();
@@ -84,9 +86,12 @@ export class AgentFiles {
       const rel = cwd && f.path.startsWith(`${cwd}/`) ? f.path.slice(cwd.length + 1) : f.path;
       out.push({ id, name: f.path.split('/').pop() || f.path, path: rel, kind: type.kind, at: f.at });
     }
-    this.ids.delete(agentId);
-    this.ids.set(agentId, ids);
-    if (this.ids.size > MAX_AGENTS) this.ids.delete(this.ids.keys().next().value as string);
+    // Transcript ilegível agora: lista vazia, mas os ids da última boa listagem continuam valendo.
+    if (readable) {
+      this.ids.delete(agentId);
+      this.ids.set(agentId, ids);
+      if (this.ids.size > MAX_AGENTS) this.ids.delete(this.ids.keys().next().value as string);
+    }
     return out;
   }
 
