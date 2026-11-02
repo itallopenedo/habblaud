@@ -3349,4 +3349,10 @@ export const EN: Readonly<Record<string, string>> = {
   "Seta para cima": "Up arrow",
   "Seta para baixo": "Down arrow",
   "Seta para a direita": "Right arrow",
+  "fora da pasta do agente": "outside the agent's folder",
+  "{0} · responda pelos botões na gaveta do agente ou no Claude Desktop": "{0} · answer with the buttons in the agent panel or in Claude Desktop",
+  "{0} · responda no Claude Desktop": "{0} · answer in Claude Desktop",
+  "Anexos antigos apagados: {0} (mais de 7 dias, em {1}).": "Old attachments deleted: {0} (older than 7 days, in {1}).",
+  "native:install: não deu para religar o serviço; rode npm run native:install de novo": "native:install: could not restart the service; run npm run native:install again",
+  "Não consegui devolver a permissão de execução a {0}: {1}": "Could not restore the execute permission on {0}: {1}",
 };

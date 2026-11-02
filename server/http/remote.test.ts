@@ -591,6 +591,41 @@ describe('porta remota', () => {
     }
   });
 
+  it('aba Arquivos: arquivo fora da pasta do agente nem aparece na lista, e um atalho para fora é recusado (403) ao abrir', async (ctx) => {
+    const tmp = tempDir();
+    try {
+      const proj = join(tmp.dir, 'loja');
+      const outro = join(tmp.dir, 'outro');
+      mkdirSync(proj);
+      mkdirSync(outro);
+      writeFileSync(join(proj, 'a.md'), 'dentro');
+      writeFileSync(join(outro, 'b.md'), 'conteudo-de-outro-projeto');
+      symlinkOrSkip(ctx.skip, join(outro, 'b.md'), join(proj, 'atalho.md'));
+      const transcript = join(tmp.dir, 't.jsonl');
+      writeLines(transcript, [
+        L.assistant([L.tool('w1', 'Write', { file_path: join(proj, 'a.md'), content: 'x' })]),
+        L.assistant([L.tool('w2', 'Write', { file_path: join(outro, 'b.md'), content: 'x' })]),
+        L.assistant([L.tool('w3', 'Write', { file_path: join(proj, 'atalho.md'), content: 'x' })]),
+      ]);
+      // Roots vazias: o tmp.dir (em /var/folders) não vale como pasta temporária neste teste.
+      const s = await start(['terminal'], {
+        agentFiles: new AgentFiles({ transcriptPathOf: () => transcript, cwdOf: () => proj, roots: [] }),
+        files: new FileFetcher({ direct: true }),
+      });
+      const headers = { Cookie: await login(s.remoteBase) };
+      const { files } = JSON.parse((await request(s.remoteBase, '/api/agents/a1/files', { headers })).body);
+      expect(files.map((f: { name: string }) => f.name).sort()).toEqual(['a.md', 'atalho.md']);
+      const idOf = (name: string) => files.find((f: { name: string }) => f.name === name).id;
+      const dentro = await request(s.remoteBase, `/api/agents/a1/files/${idOf('a.md')}`, { headers });
+      expect([dentro.status, dentro.body]).toEqual([200, 'dentro']);
+      const fora = await request(s.remoteBase, `/api/agents/a1/files/${idOf('atalho.md')}`, { headers });
+      expect(fora.status).toBe(403);
+      expect(fora.body).not.toContain('conteudo-de-outro-projeto');
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
   it('aba Arquivos: só com terminal liberado; lista e abre pelo id, nunca pelo caminho', async () => {
     const tmp = tempDir();
     try {

@@ -54,8 +54,11 @@ export class FileFetcher {
     return this.host.present();
   }
 
-  /** `fresh`: ignora e descarta a cópia em cache e lê de novo (arquivos que o agente reescreve; as entregas não usam). */
-  async get(path: string, opts: { fresh?: boolean } = {}): Promise<FetchResult> {
+  /**
+   * `fresh`: ignora e descarta a cópia em cache e lê de novo (arquivos que o agente reescreve; as entregas não usam).
+   * `allow`: restrição a mais sobre o caminho real, no modo Node (no Docker o auxiliar do host só segue o `inside` dele).
+   */
+  async get(path: string, opts: { fresh?: boolean; allow?: (realPath: string) => boolean } = {}): Promise<FetchResult> {
     if (opts.fresh) this.forget(path);
     const hit = this.cache.get(path);
     if (hit) {
@@ -65,7 +68,7 @@ export class FileFetcher {
     }
     const local = this.opts.direct ? path : this.opts.mapHostPath?.(path);
     if (local) {
-      const r = this.readLocal(local);
+      const r = this.readLocal(local, opts.allow);
       if ('data' in r || this.opts.direct) return r;
     }
     if (this.opts.direct) return { error: tr('arquivo não encontrado'), status: 404 };
@@ -119,10 +122,11 @@ export class FileFetcher {
     }
   }
 
-  private readLocal(path: string): FetchResult {
+  private readLocal(path: string, allow?: (realPath: string) => boolean): FetchResult {
     const c = (this.opts.check ?? checkFile)(path);
     if ('error' in c) return { error: c.error, status: c.error === tr('arquivo não encontrado') ? 404 : 403 };
     if (this.opts.direct && this.opts.inside && !this.opts.inside(c.path)) return { error: tr('fora das pastas de projeto'), status: 403 };
+    if (this.opts.direct && allow && !allow(c.path)) return { error: tr('fora da pasta do agente'), status: 403 };
     try {
       const data = (this.opts.read ?? readFileSync)(c.path);
       this.remember(path, data);

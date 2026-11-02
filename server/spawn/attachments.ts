@@ -4,7 +4,7 @@
 // (scripts/codex-bridge.ts) no Docker. Os arquivos chegam como JSON base64 (o guard exige JSON em todo POST: CSRF).
 // Node puro e sem dependências: também é importado pelo auxiliar do host (via tsx).
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { tr } from '../../shared/i18n';
@@ -141,6 +141,65 @@ export function writeAttachments(root: string, spawnId: string, files: readonly 
 /** Anexos de uma mensagem: pasta própria a cada envio (o id da mensagem muda só no fim: duas fotos `image.jpg` no mesmo segundo colidiam). */
 export function writeMessageAttachments(root: string, files: readonly Attachment[]): string[] {
   return writeAttachments(root, randomUUID(), files);
+}
+
+/** Pastas de anexos mais velhas que isto (pelo mtime da pasta) são apagadas; a limpeza roda ao subir e a cada 6 h. */
+export const ATTACHMENT_KEEP_MS = 7 * 24 * 60 * 60_000;
+const CLEANUP_EVERY_MS = 6 * 60 * 60_000;
+/** O nome que writeAttachments cria: AAAAMMDD-HHMMSS-<id de até 8 caracteres>. */
+const ATTACHMENT_DIR = /^\d{8}-\d{6}-[\w-]{1,8}$/;
+
+interface CleanFs {
+  readdir(root: string): Array<{ name: string; isDirectory(): boolean }>;
+  mtimeMs(path: string): number;
+  rm(path: string): void;
+}
+
+/**
+ * Apaga as pastas de anexos com mais de `ATTACHMENT_KEEP_MS`. Só olha os filhos diretos de `root`, só diretórios de verdade
+ * (um link não é diretório para o readdir: nunca é seguido) e só nomes no formato do Habblaud. Devolve quantas apagou.
+ */
+export function cleanOldAttachments(
+  root: string,
+  opts: { now?: number; fs?: CleanFs } = {},
+): number {
+  const now = opts.now ?? Date.now();
+  const fs: CleanFs = opts.fs ?? {
+    readdir: (r) => readdirSync(r, { withFileTypes: true }),
+    mtimeMs: (p) => lstatSync(p).mtimeMs,
+    rm: (p) => rmSync(p, { recursive: true, force: true }),
+  };
+  let entries: ReturnType<CleanFs['readdir']>;
+  try {
+    entries = fs.readdir(root);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const e of entries) {
+    if (!e.isDirectory() || !ATTACHMENT_DIR.test(e.name)) continue;
+    const dir = join(root, e.name);
+    try {
+      if (now - fs.mtimeMs(dir) <= ATTACHMENT_KEEP_MS) continue;
+      fs.rm(dir);
+      removed++;
+    } catch {
+      // sem permissão ou já sumiu: fica para a próxima rodada
+    }
+  }
+  return removed;
+}
+
+/** Limpa agora e a cada 6 h (o timer não segura o processo). Devolve quem para. */
+export function startAttachmentsCleanup(root: string, log: (line: string) => void): () => void {
+  const run = () => {
+    const n = cleanOldAttachments(root);
+    if (n) log(tr('Anexos antigos apagados: {0} (mais de 7 dias, em {1}).', [n, root]));
+  };
+  run();
+  const timer = setInterval(run, CLEANUP_EVERY_MS);
+  timer.unref();
+  return () => clearInterval(timer);
 }
 
 /** O pedido com a lista dos anexos no fim (o agente lê os arquivos pelos caminhos). */

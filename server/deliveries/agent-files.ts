@@ -4,6 +4,7 @@
 // escritório (mesmos tipos e mesma blocklist das entregas, deliveries/files.ts); quem lê o arquivo é o FileFetcher das
 // entregas. Os ids são opacos e valem para a última listagem de cada agente.
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import type { AgentFileInfo } from '../../shared/types';
 import { FileTail } from '../sources/tail';
 import { fileType, pathProblem } from './files';
@@ -50,7 +51,15 @@ export interface AgentFilesOptions {
   transcriptPathOf: (agentId: string) => string | undefined;
   /** Pasta do projeto do agente (para mostrar o caminho relativo). */
   cwdOf: (agentId: string) => string | undefined;
+  /** Pastas fora do projeto que também valem ao abrir (temporárias e anexos do Habblaud). */
+  roots?: readonly string[];
 }
+
+/** `path` está dentro de `dir`? Pasta vazia ou a raiz "/" não contam: liberariam o disco inteiro. */
+const within = (path: string, dir: string): boolean => {
+  const d = dir.trim().replace(/\/+$/, '');
+  return !!d && path.startsWith(`${d}/`);
+};
 
 export class AgentFiles {
   private readonly ids = new Map<string, Map<string, string>>();
@@ -81,7 +90,7 @@ export class AgentFiles {
     for (const f of writtenFiles(lines)) {
       if (out.length >= MAX_AGENT_FILES) break;
       const type = fileType(f.path);
-      if (!type || pathProblem(f.path)) continue;
+      if (!type || pathProblem(f.path) || !this.allows(agentId, f.path)) continue;
       const id = createHash('sha256').update(`${agentId}|${f.path}`).digest('hex').slice(0, 20);
       ids.set(id, f.path);
       const rel = cwd && f.path.startsWith(`${cwd}/`) ? f.path.slice(cwd.length + 1) : f.path;
@@ -94,6 +103,24 @@ export class AgentFiles {
       if (this.ids.size > MAX_AGENTS) this.ids.delete(this.ids.keys().next().value as string);
     }
     return out;
+  }
+
+  /**
+   * Pode abrir `path` (o caminho escrito pelo agente ou o real, depois dos links)? Só dentro da pasta do próprio agente
+   * (ela ou o caminho real dela) ou das raízes: sem isto, o arquivo de um agente alcançaria o resto do computador.
+   * ponytail: um agente aberto no $HOME enxerga o que há no $HOME; o limite é a pasta dele, não o projeto dentro dela.
+   */
+  allows(agentId: string, path: string): boolean {
+    if ((this.opts.roots ?? []).some((r) => within(path, r))) return true;
+    const cwd = this.opts.cwdOf(agentId);
+    if (!cwd) return false;
+    let real = cwd;
+    try {
+      real = realpathSync(cwd);
+    } catch {
+      // pasta que não existe mais: vale só o texto
+    }
+    return within(path, cwd) || within(path, real);
   }
 
   /** Caminho real de um id da última listagem do agente. */

@@ -15,6 +15,7 @@ import { copyText, h, iconButton, prefersReducedMotion, setAttr, setHidden, setT
 import { calendarDayDiff, formatClock, formatDateTime, formatDuration, formatElapsed, relativeTime } from './format';
 import { ICONS } from './icons';
 import { maximizeButton, Movable } from './movable';
+import { access } from '../net/access';
 import type { PtyControl } from './pty';
 import { TermActions } from './termactions';
 import { TermTabs } from './termtabs';
@@ -369,7 +370,11 @@ export interface TerminalFooter {
 }
 
 /** Linha de estado do rodapé, imitando o Claude Code, a partir do agente vivo no snapshot. */
-export function terminalFooter(agent: AgentInfo | undefined, agents: readonly AgentInfo[], now: number): TerminalFooter {
+/**
+ * `canAnswer`: a gaveta mostra os botões da pergunta do Claude Desktop (canMessage, mensagens liberadas, fora do
+ * timelapse; as mesmas condições de drawer.ts).
+ */
+export function terminalFooter(agent: AgentInfo | undefined, agents: readonly AgentInfo[], now: number, canAnswer = false): TerminalFooter {
   if (!agent || agent.status === 'offline') return { kind: 'ended', text: tr('Sessão encerrada') };
   if (agent.status === 'done') return { kind: 'ended', text: tr('Subagente concluído · sessão encerrada') };
   const wait = shellWaitIn(agent, agents, now);
@@ -389,9 +394,13 @@ export function terminalFooter(agent: AgentInfo | undefined, agents: readonly Ag
       // Sem o pedido no Habblaud (o hook já devolveu à sessão, a sessão abriu sem o plugin ou não havia página aberta
       // quando ele chegou): os botões não vêm, então diz onde responder.
       const hint =
-        agent.provider === 'codex'
-          ? tr('{0} · responda no Codex: este pedido não chegou ao Habblaud ou passou do tempo de espera', [text])
-          : tr('{0} · responda no Claude Code: este pedido não chegou ao Habblaud ou passou do tempo de espera', [text]);
+        agent.activity?.tool === 'mcp__ccd_turn__wrap_up'
+          ? agent.canMessage && canAnswer
+            ? tr('{0} · responda pelos botões na gaveta do agente ou no Claude Desktop', [text])
+            : tr('{0} · responda no Claude Desktop', [text])
+          : agent.provider === 'codex'
+            ? tr('{0} · responda no Codex: este pedido não chegou ao Habblaud ou passou do tempo de espera', [text])
+            : tr('{0} · responda no Claude Code: este pedido não chegou ao Habblaud ou passou do tempo de espera', [text]);
       return { kind: 'waiting', text: hint, since: agent.statusSince };
     }
     default:
@@ -1439,7 +1448,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     const agent = this.ctx.agent(this.id);
     const provider = providerOf(agent ?? this.last);
     this.frames = spinnerFrames(provider);
-    const f = terminalFooter(agent, this.ctx.store.snapshot?.agents ?? [], now);
+    const f = terminalFooter(agent, this.ctx.store.snapshot?.agents ?? [], now, access().messages && !this.ctx.store.replaying);
     setVariant(this.status, 'is-', f.kind);
     setText(this.statusText, f.text);
     setTitle(this.status, f.text);

@@ -798,9 +798,10 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           const p = list.path(id, fileId);
           const type = p ? fileType(p) : undefined;
           if (!p || !type) sendJson(res, 404, { error: tr('arquivo desconhecido: atualize a lista') });
+          else if (!list.allows(id, p)) sendJson(res, 403, { error: tr('fora da pasta do agente') });
           else
             // O agente reescreve estes arquivos: sempre a versão atual do disco (sem cache aqui nem no navegador).
-            files.get(p, { fresh: true }).then(
+            files.get(p, { fresh: true, allow: (real) => list.allows(id, real) }).then(
               (r) => ('data' in r ? sendFile(res, r.data, type.type, p.split('/').pop() || 'arquivo', 'no-store') : sendJson(res, r.status, { error: r.error })),
               (err) => fail(res, err),
             );

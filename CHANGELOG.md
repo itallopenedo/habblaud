@@ -12,6 +12,20 @@ do meio (0.**3**.0).
 
 ### Corrigido
 
+- **Terminal: o `spawn-helper` do node-pty é conferido a cada terminal novo.** Um `npm install` com o serviço no ar
+  desfazia a permissão e quebrava todo terminal até reiniciar; agora ela volta sozinha (e uma falha vira aviso no log).
+- **Serviço nativo: idioma certo e falha visível ao reinstalar.** O LaunchAgent usa o `LANG` de quem instalou (ex.:
+  `pt_BR.UTF-8`) quando for UTF-8 e o locale existir, em vez de sempre `en_US.UTF-8`. Se o `native:install` não conseguir religar o
+  serviço (agora 10 tentativas), o log de erro ganha uma linha com a data dizendo para rodar o comando de novo.
+- **Anexos antigos são apagados sozinhos.** As pastas em `~/.habblaud/attachments/` com mais de 7 dias (só as que o
+  Habblaud criou, sem seguir links) saem ao subir o servidor e a cada 6 h. No Docker, quem limpa é o auxiliar do host
+  (`npm run codex:bridge`), porque é ele que grava os anexos.
+- **Rodapé do terminal na pergunta do Claude Desktop.** Em vez de dizer que o pedido "não chegou ao Habblaud", o rodapé
+  manda responder pelos botões na gaveta do agente ou no Claude Desktop.
+- **Aba Arquivos abre só o que está na pasta do próprio agente.** Antes valia qualquer pasta com projeto do Claude Code
+  (e `~/.claude/projects/-Users-fulano` faz quase o home inteiro contar). Agora o arquivo precisa estar na pasta do
+  agente (ou nas temporárias e nos anexos do Habblaud); um agente aberto no home continua vendo o que está no home.
+  As entregas seguem a regra de antes.
 - **Arquivos do agente no modo Node só das pastas de projeto.** Sem o Docker, a seção Arquivos e as entregas abriam
   qualquer arquivo de ver que o agente citasse; agora valem só as pastas de projeto que o Claude Code conhece, as
   temporárias e os anexos do Habblaud, a mesma regra que o auxiliar do host já seguia no Docker.

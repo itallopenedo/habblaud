@@ -24,7 +24,7 @@ import { createCodexQueueRunner, findCodexBin, THREAD_ID, type CodexQueueResult,
 import { tr } from '../shared/i18n';
 import { createCliRunner, createOpener, folderProblem, launch, parseSpawn, type CliRunner, type Opener, type SpawnHow } from '../server/spawn/spawn';
 import { runnableClaudeBin } from '../server/claude-bin';
-import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_SPAWN, attachmentsRoot, promptWithAttachments, safeFileName, writeAttachments, type Attachment } from '../server/spawn/attachments';
+import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_SPAWN, attachmentsRoot, promptWithAttachments, safeFileName, startAttachmentsCleanup, writeAttachments, type Attachment } from '../server/spawn/attachments';
 import { createWhisperTranscriber, findWhisper, type Transcriber } from '../server/dictation/whisper';
 import { checkFile, insideKnownFolder, tempRoots } from '../server/deliveries/files';
 import { discoverClaudeDirs } from '../server/accounts/detect';
@@ -402,6 +402,8 @@ async function main(): Promise<void> {
     const accountDirs = discoverClaudeDirs(process.env);
     const roots = [...tempRoots(), attachmentsRoot()];
     const inside = (p: string) => insideKnownFolder(p, { accountDirs, roots });
+    // No Docker quem grava os anexos é este auxiliar: a limpeza das pastas com mais de 7 dias também.
+    startAttachmentsCleanup(attachmentsRoot(), log);
     void waitLoop(() => filesRound(waitPost, log, undefined, undefined, { inside, wait: true }));
     void waitLoop(() => attachmentsRound(waitPost, log, undefined, { wait: true }));
     if (transcribe) {

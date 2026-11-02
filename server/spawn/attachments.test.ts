@@ -1,8 +1,9 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { tempDir } from '../test/fixtures';
+import { symlinkOrSkip, tempDir } from '../test/fixtures';
 import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_SPAWN, AttachmentStore, parseAttachment, promptWithAttachments, safeFileName, writeAttachments, writeMessageAttachments } from './attachments';
+import { ATTACHMENT_KEEP_MS, cleanOldAttachments } from './attachments';
 
 const b64 = (s: string) => Buffer.from(s).toString('base64');
 
@@ -89,5 +90,78 @@ describe('anexos do Novo agente', () => {
     expect(store.put(file(6))).toHaveProperty('error');
     store.release(6);
     expect(store.put(file(6))).toEqual({ id: 'a2' });
+  });
+});
+
+describe('limpeza dos anexos antigos', () => {
+  const DAY = 24 * 60 * 60_000;
+  const NOW = Date.UTC(2026, 10, 1);
+  /** Pasta falsa: nome, idade em dias e se é diretório comum (links e arquivos soltos não são). */
+  const entry = (name: string, days: number, dir = true) => ({ name, days, dir });
+  const run = (entries: ReturnType<typeof entry>[]) => {
+    const removed: string[] = [];
+    const n = cleanOldAttachments('/h/attachments', {
+      now: NOW,
+      fs: {
+        readdir: () => entries.map((e) => ({ name: e.name, isDirectory: () => e.dir })),
+        mtimeMs: (p) => NOW - entries.find((e) => p.endsWith(`/${e.name}`))!.days * DAY,
+        rm: (p) => void removed.push(p),
+      },
+    });
+    return { n, removed };
+  };
+
+  it(`apaga só as pastas do formato do Habblaud com mais de ${ATTACHMENT_KEEP_MS / DAY} dias`, () => {
+    const { n, removed } = run([
+      entry('20261001-101500-ab12cd34', 30),
+      entry('20261020-101500-pedido', 8),
+      entry('20261029-101500-ab12cd34', 3),
+      entry('20261001-101500-ab12cd34x9', 30),
+      entry('minhas-fotos', 90),
+      entry('20260101-000000-ab12cd34', 90, false),
+    ]);
+    expect(removed).toEqual(['/h/attachments/20261001-101500-ab12cd34', '/h/attachments/20261020-101500-pedido']);
+    expect(n).toBe(2);
+  });
+
+  it('um erro numa pasta não impede as outras; conta só as apagadas', () => {
+    const removed: string[] = [];
+    const n = cleanOldAttachments('/h/a', {
+      now: NOW,
+      fs: {
+        readdir: () => ['20260101-000000-aaaa', '20260101-000000-bbbb'].map((name) => ({ name, isDirectory: () => true })),
+        mtimeMs: () => 0,
+        rm: (p) => {
+          if (p.endsWith('aaaa')) throw new Error('EACCES');
+          removed.push(p);
+        },
+      },
+    });
+    expect([n, removed]).toEqual([1, ['/h/a/20260101-000000-bbbb']]);
+  });
+
+  it('pasta de anexos inexistente: 0, sem erro', () => {
+    expect(cleanOldAttachments(join(tempDir().dir, 'nao-existe'))).toBe(0);
+  });
+
+  it('no disco: apaga a pasta velha com o conteúdo e deixa o link e a recente', (ctx) => {
+    const tmp = tempDir();
+    try {
+      const old = join(tmp.dir, '20260101-000000-ab12cd34');
+      writeAttachments(tmp.dir, 'ab12cd34', [{ name: 'a.png', type: 'image/png', data: Buffer.from('x') }], new Date(2026, 0, 1));
+      const fresh = join(tmp.dir, '20261101-000000-ee');
+      mkdirSync(fresh);
+      const alvo = join(tmp.dir, 'fora');
+      mkdirSync(alvo);
+      writeFileSync(join(alvo, 'precioso.txt'), 'x');
+      symlinkOrSkip(ctx.skip, alvo, join(tmp.dir, '20250101-000000-link'));
+      utimesSync(old, new Date(2026, 0, 1), new Date(2026, 0, 1));
+      utimesSync(join(tmp.dir, '20250101-000000-link'), new Date(2025, 0, 1), new Date(2025, 0, 1));
+      expect(cleanOldAttachments(tmp.dir, { now: Date.now() })).toBe(1);
+      expect(readdirSync(tmp.dir).sort()).toEqual(['20250101-000000-link', '20261101-000000-ee', 'fora']);
+      expect(readdirSync(alvo)).toEqual(['precioso.txt']);
+    } finally {
+      tmp.cleanup();
+    }
   });
 });
