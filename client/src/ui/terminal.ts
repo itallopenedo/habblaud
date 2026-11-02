@@ -501,13 +501,15 @@ function row(kind: string, at: number, now: number, ...children: (Node | null)[]
 type Pics = (images: readonly TerminalImage[]) => HTMLElement | null;
 
 /** Miniaturas que abrem a imagem grande num toque; imagem que não carrega volta a ser "[imagem]". */
-function imageStrip(stream: string, images: readonly TerminalImage[], open: (src: string) => void): HTMLElement | null {
+function imageStrip(stream: string, images: readonly TerminalImage[], open: (src: string) => void, onLoad: () => void): HTMLElement | null {
   if (!stream || !images.length) return null;
   const strip = h('div', { class: 'ui-term__pics', attrs: { 'data-chrome': '' } });
   images.forEach((img, i) => {
     const src = terminalImageUrl(stream, img.id);
     const thumb = h('img', { class: 'ui-term__pic', attrs: { src, alt: tr('Imagem {0}', [i + 1]), loading: 'lazy', decoding: 'async' } });
     const btn = h('button', { class: 'ui-term__pic-btn', type: 'button', attrs: { 'aria-label': tr('Ampliar a imagem {0}', [i + 1]) }, on: { click: () => open(src) } }, thumb);
+    // A miniatura não tem tamanho reservado: ao carregar, quem segue o fim da conversa volta ao fim.
+    thumb.addEventListener('load', onLoad, { once: true });
     // Fora do cache (404) ou erro: troca o botão inteiro pelo texto, sem ícone de imagem quebrada.
     thumb.addEventListener('error', () => btn.replaceWith(h('span', { class: 'ui-term__empty', text: tr('[imagem]') })), { once: true });
     strip.append(btn);
@@ -625,7 +627,13 @@ export class TerminalPanel implements UiComponent, TerminalControl {
   private stream = '';
   private readonly imageView: HTMLDialogElement;
   private readonly imageImg: HTMLImageElement;
-  private pics: Pics = (images) => imageStrip(this.stream, images, (src) => this.showImage(src));
+  private pics: Pics = (images) =>
+    imageStrip(
+      this.stream,
+      images,
+      (src) => this.showImage(src),
+      () => this.follow && this.scrollToEnd(),
+    );
   readonly el: HTMLElement;
   private id: string | null = null;
   /** Sessão do histórico aberta no painel (null = terminal de um agente). */
@@ -794,7 +802,8 @@ export class TerminalPanel implements UiComponent, TerminalControl {
       h('div', { class: 'ui-deliv-viewer__body' }, this.imageImg),
     ) as HTMLDialogElement;
     this.imageView.addEventListener('click', (e) => {
-      if (e.target === this.imageView) this.imageView.close();
+      // O visualizador ocupa a tela toda (sem fundo para tocar): qualquer toque fora da barra fecha.
+      if (!(e.target as Element).closest('.ui-deliv-viewer__bar')) this.imageView.close();
     });
     // Esc fecha só a imagem (o atalho do terminal não vê a tecla).
     this.imageView.addEventListener('keydown', (e) => e.stopPropagation());
@@ -841,6 +850,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.disconnect();
     this.stopSpinner();
     this.closeSearch(false);
+    if (this.imageView.open) this.imageView.close();
     const hadFocus = this.el.contains(document.activeElement) || document.activeElement === document.body;
     this.id = null;
     this.session = null;
