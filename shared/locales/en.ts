@@ -3355,4 +3355,15 @@ export const EN: Readonly<Record<string, string>> = {
   "Anexos antigos apagados: {0} (mais de 7 dias, em {1}).": "Old attachments deleted: {0} (older than 7 days, in {1}).",
   "native:install: não deu para religar o serviço; rode npm run native:install de novo": "native:install: could not restart the service; run npm run native:install again",
   "Não consegui devolver a permissão de execução a {0}: {1}": "Could not restore the execute permission on {0}: {1}",
+  // Fase 6 — Hermes
+  "Rodando um comando": "Running a command",
+  "Buscando nos arquivos": "Searching the files",
+  "Delegando a um subagente": "Delegating to a subagent",
+  "Atualizando as tarefas": "Updating the tasks",
+  "Usando uma skill": "Using a skill",
+  "Mandando uma mensagem": "Sending a message",
+  "Perguntando ao usuário": "Asking the user",
+  "Eventos do Hermes: falha ao aplicar um evento ({0}).": "Hermes events: failed to apply an event ({0}).",
+  "Recebeu uma mensagem": "Got a message",
+  "Agente do Hermes": "Hermes agent",
 };
