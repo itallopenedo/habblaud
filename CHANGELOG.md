@@ -43,6 +43,9 @@ do meio (0.**3**.0).
 
 ### Adicionado
 
+- **Pedidos e perguntas com botões dentro do terminal.** O cartão de aprovar ou responder (as opções do
+  `AskUserQuestion`) aparece também no rodapé do terminal, como na gaveta: no celular, onde o terminal cobre a tela,
+  dá para responder sem fechá-lo.
 - **Agentes do Hermes no escritório.** Com o plugin `habblaud-observer` (`integrations/hermes/`) ligado num perfil do
   Hermes Agent, cada sessão do Hermes vira um agente numa sala do perfil: chega ao receber uma mensagem, mostra a
   ferramenta em uso (só o nome), fica "precisa de você" num pedido de aprovação e à toa no fim do turno. O chip da conta

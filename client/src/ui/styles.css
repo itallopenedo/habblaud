@@ -5060,6 +5060,14 @@ button.ui-term__think:hover,
   font: 12.5px/1.5 var(--font-mono);
 }
 
+/* Cartão do pedido/pergunta no rodapé do terminal: rola sozinho para não empurrar a conversa para fora da tela. */
+.ui-term__foot > .ui-perm {
+  margin: 0 0 10px;
+  max-height: 55vh;
+  overflow-y: auto;
+  font-family: var(--font-ui);
+}
+
 .ui-term__status {
   display: flex;
   align-items: baseline;
