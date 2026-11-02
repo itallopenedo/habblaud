@@ -3,6 +3,7 @@ import { isDemoId } from '../../../shared/timeline';
 import type { AgentInfo, PtyInfo } from '../../../shared/types';
 import { providerOf } from './provider';
 import { tr } from '../../../shared/i18n';
+import { isReauth, ReauthError } from './reauth';
 
 /**
  * Dá para encerrar ou assumir este agente pelo escritório? Só o agente principal de uma sessão do Claude Code: o
@@ -20,7 +21,8 @@ export async function postPty<T = unknown>(url: string, body: unknown): Promise<
     throw new Error(tr('o Habblaud não respondeu'));
   }
   if (res.status === 204) return undefined;
-  const j = (await res.json().catch(() => ({}))) as { error?: string };
+  const j = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+  if (isReauth(res.status, j)) throw new ReauthError(j.error ?? tr('confirme a senha para abrir o terminal'));
   if (!res.ok) throw new Error(j.error ?? tr('erro {0}', [res.status]));
   return j as T;
 }

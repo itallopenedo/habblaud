@@ -11223,3 +11223,98 @@ html.is-replay #world {
   font-size: 12px;
   color: var(--ui-muted);
 }
+
+/* Senha de novo para o terminal pelo celular (ui/reauth.ts). */
+.ui-reauth-dialog {
+  width: min(360px, calc(100vw - 32px));
+  padding: 0;
+  border: 2px solid var(--ui-line-strong);
+  border-radius: var(--radius);
+  background: #1e2130;
+  color: inherit;
+}
+
+.ui-reauth-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.ui-reauth {
+  display: grid;
+  gap: 10px;
+  padding: 20px;
+}
+
+.ui-reauth__title {
+  margin: 0;
+  font-size: 17px;
+}
+
+.ui-reauth__input {
+  width: 100%;
+  padding: 10px;
+  font: inherit;
+  /* 16px: o iPhone não dá zoom no campo. */
+  font-size: 16px;
+  color: inherit;
+  background: #14161f;
+  border: 2px solid var(--ui-line-strong);
+  border-radius: 6px;
+}
+
+.ui-reauth__err {
+  margin: 0;
+  color: #ff8a80;
+  font-size: 13px;
+}
+
+.ui-reauth__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Barra de teclas do terminal interativo (ui/ptykeys.ts): só com tela de toque. */
+.ui-pty__keys {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .ui-pty__keys {
+    display: flex;
+    flex: none;
+    gap: 6px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    overflow-x: auto;
+    background: #0a0c12;
+    border-top: 1px solid var(--ui-line);
+  }
+
+  .ui-pty__keys[hidden] {
+    display: none;
+  }
+}
+
+.ui-pty__key {
+  flex: none;
+  min-width: 44px;
+  min-height: 36px;
+  padding: 0 10px;
+  font: 600 13px/1 ui-monospace, Menlo, monospace;
+  color: var(--term-fg);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 6px;
+  touch-action: manipulation;
+}
+
+.ui-pty__key.is-on {
+  background: color-mix(in srgb, var(--st-working) 30%, transparent);
+  border-color: var(--st-working);
+}
+
+/* Celular com o teclado aberto: a janela termina em cima dele (--ui-pty-kb, ui/pty.ts). */
+@media (max-width: 600px) {
+  .ui-term.ui-pty {
+    bottom: var(--ui-pty-kb, 0px);
+  }
+}

@@ -5,12 +5,15 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { postPty } from './ptyapi';
+import { PtyKeys } from './ptykeys';
 import { tr } from '../../../shared/i18n';
 
 const RESIZE_DEBOUNCE_MS = 120;
 
 export class PtyPane {
   readonly el: HTMLElement;
+  /** Barra de teclas do celular (Esc, Tab, Ctrl, setas); quem hospeda a coloca na janela. */
+  readonly keys: PtyKeys;
   private term: Terminal;
   private fit: FitAddon;
   private es: EventSource | null = null;
@@ -22,7 +25,10 @@ export class PtyPane {
   private resizeTimer: ReturnType<typeof setTimeout> | null = null;
   private ro: ResizeObserver;
 
-  constructor(private onExit: () => void) {
+  constructor(
+    private onExit: () => void,
+    private onDenied: () => void,
+  ) {
     this.el = document.createElement('div');
     this.el.className = 'ui-pty__screen';
     this.term = new Terminal({
@@ -35,7 +41,12 @@ export class PtyPane {
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
     this.term.open(this.el);
-    this.term.onData((d) => this.send(d));
+    this.keys = new PtyKeys(
+      (d) => this.send(d),
+      () => this.term.modes.applicationCursorKeysMode,
+      () => this.term.focus(),
+    );
+    this.term.onData((d) => this.send(this.keys.apply(d)));
     this.term.onResize(({ cols, rows }) => this.scheduleResize(cols, rows));
     this.ro = new ResizeObserver(() => this.refit());
     this.ro.observe(this.el);
@@ -72,12 +83,25 @@ export class PtyPane {
       es.close();
       this.onExit();
     });
+    es.onerror = () => {
+      // Recusado (401 da senha vencida, 403, 404): o EventSource desiste sozinho (CLOSED) e não diz o status.
+      if (es.readyState === EventSource.CLOSED && this.es === es && !this.exited) {
+        this.es = null;
+        this.onDenied();
+      }
+    };
   }
 
   detach(): void {
+    this.keys.reset();
     this.es?.close();
     this.es = null;
     this.id = null;
+  }
+
+  /** Aviso apagado na tela (ex.: sem conexão com o terminal). */
+  notice(text: string): void {
+    this.term.write(`\r\n\x1b[2m[${text}]\x1b[0m\r\n`);
   }
 
   focus(): void {

@@ -10,14 +10,17 @@ import { Office } from '../model/office';
 import { AgentFiles } from '../deliveries/agent-files';
 import { FileFetcher } from '../deliveries/fetcher';
 import { L, symlinkOrSkip, tempDir, writeLines } from '../test/fixtures';
+import { loadConfig, scrubSecretsFromEnv } from '../config';
 import { createApiHandler, sendJson, type ApiDeps } from './app';
 import { createRequestGuard, isLoopbackHost } from './guard';
 import {
+  CONFIRM_MS,
   COOKIE,
   createRemoteGate,
   isRemoteRequest,
   loadSecret,
   LoginThrottle,
+  OWN_MS,
   parseAllow,
   parseRemoteConfig,
   readCookie,
@@ -70,6 +73,7 @@ describe('parseRemoteConfig', () => {
   });
   it('HABBLAUD_REMOTE_ALLOW: lista, ignora nomes desconhecidos, "none" = só ver', () => {
     expect([...parseAllow('messages, Terminal, bogus')]).toEqual(['messages', 'terminal']);
+    expect([...parseAllow('terminal,pty')]).toEqual(['terminal', 'pty']);
     expect([...parseAllow('none')]).toEqual([]);
     expect([...parseAllow('')]).toEqual(['permissions']);
   });
@@ -677,8 +681,9 @@ describe('GET /api/access (o que a página pode fazer)', () => {
       terminal: false,
       spawn: false,
       world: false,
+      pty: false,
     });
-    expect(JSON.parse((await request(h.localBase, '/api/access')).body)).toEqual({ remote: false, local: true, permissions: true, messages: true, terminal: false, spawn: true, world: true });
+    expect(JSON.parse((await request(h.localBase, '/api/access')).body)).toEqual({ remote: false, local: true, permissions: true, messages: true, terminal: false, spawn: true, world: true, pty: true });
     expect(JSON.parse((await request(h.localBase, '/api/access', { headers: { Host: '192.168.1.5:4747' } })).body)).toMatchObject({
       local: false,
       permissions: false,
@@ -717,5 +722,115 @@ describe('cookie Secure e download da CA', () => {
     expect(ca.status).toBe(200);
     expect(ca.headers['content-type']).toBe('application/x-x509-ca-cert');
     expect((await request(base, '/login')).body).toContain('/remote/ca.crt');
+  });
+});
+
+describe('RemoteSessions — senha conferida há pouco (terminal pelo celular)', () => {
+  it('o login conta como conferência; vence em CONFIRM_MS; confirm renova; token inválido ou encerrado não', () => {
+    let now = 1_800_000_000_000;
+    const s = new RemoteSessions(SECRET, CFG, () => now);
+    const { token } = s.issue();
+    expect(s.confirmedWithin(token, CONFIRM_MS)).toBe(true);
+    now += CONFIRM_MS;
+    expect(s.confirmedWithin(token, CONFIRM_MS)).toBe(false);
+    expect(s.confirm(token)).toBe(true);
+    expect(s.confirmedWithin(token, CONFIRM_MS)).toBe(true);
+    expect(s.confirm('v1.1800000000000.x')).toBe(false);
+    expect(s.confirmedWithin(undefined, CONFIRM_MS)).toBe(false);
+    s.revoke(token);
+    expect(s.confirm(token)).toBe(false);
+    expect(s.confirmedWithin(token, CONFIRM_MS)).toBe(false);
+  });
+
+  it('cada token tem a sua conferência (outro aparelho não herda)', () => {
+    let now = 1_800_000_000_000;
+    const s = new RemoteSessions(SECRET, CFG, () => now);
+    const a = s.issue().token;
+    now += 1_000;
+    const b = s.issue().token;
+    now += CONFIRM_MS - 500;
+    expect(s.confirmedWithin(a, CONFIRM_MS)).toBe(false);
+    expect(s.confirmedWithin(b, CONFIRM_MS)).toBe(true);
+  });
+
+  it('terminais da sessão: só registra com a senha recente; é por token; Sair apaga', () => {
+    let now = 1_800_000_000_000;
+    const s = new RemoteSessions(SECRET, CFG, () => now);
+    const a = s.issue().token;
+    now += 1_000;
+    const b = s.issue().token;
+    expect(s.claim(a, 'p1')).toBe(true);
+    expect(s.owns(a, 'p1')).toBe(true);
+    expect(s.owns(a, 'p2')).toBe(false);
+    expect(s.owns(b, 'p1')).toBe(false);
+    expect(s.owns(undefined, 'p1')).toBe(false);
+    expect(s.claim('v1.1800000000000.x', 'p1')).toBe(false);
+    now += CONFIRM_MS;
+    expect(s.claim(a, 'p2')).toBe(false);
+    expect(s.owns(a, 'p2')).toBe(false);
+    expect(s.owns(a, 'p1')).toBe(true);
+    s.revoke(a);
+    expect(s.owns(a, 'p1')).toBe(false);
+    expect(s.confirm(a)).toBe(false);
+  });
+
+  it('relógio que volta para trás: a conferência deixa de valer (falha fechado)', () => {
+    let now = 1_800_000_000_000;
+    const s = new RemoteSessions(SECRET, CFG, () => now);
+    const { token } = s.issue();
+    expect(s.confirmedWithin(token, CONFIRM_MS)).toBe(true);
+    now -= 1;
+    expect(s.confirmedWithin(token, CONFIRM_MS)).toBe(false);
+  });
+
+  it(`o terminal da sessão vale no máximo ${OWN_MS / 3_600_000} h depois de registrado (cada um com o seu prazo)`, () => {
+    let now = 1_800_000_000_000;
+    const s = new RemoteSessions(SECRET, CFG, () => now);
+    const a = s.issue().token;
+    expect(s.claim(a, 'p1')).toBe(true);
+    now += CONFIRM_MS - 1;
+    expect(s.claim(a, 'p2')).toBe(true);
+    now += OWN_MS - CONFIRM_MS + 1;
+    expect(s.owns(a, 'p1')).toBe(false);
+    expect(s.owns(a, 'p2')).toBe(true);
+    now += CONFIRM_MS;
+    expect(s.owns(a, 'p2')).toBe(false);
+  });
+});
+
+describe('segredos fora do ambiente dos filhos', () => {
+  it('scrubSecretsFromEnv: a configuração continua carregada, mas usuário, hash e login do Tailscale saem do ambiente', () => {
+    const env: NodeJS.ProcessEnv = {
+      HOME: '/h',
+      HABBLAUD_REMOTE_USER: 'ana',
+      HABBLAUD_REMOTE_PASSWORD_HASH: HASH_TEXT,
+      HABBLAUD_REMOTE_INSECURE_HTTP: '1',
+      HABBLAUD_TAILNET_USER: 'ana@example.com',
+      HABBLAUD_REMOTE_ALLOW: 'pty',
+      PATH: '/bin',
+    };
+    const config = loadConfig(env, []);
+    scrubSecretsFromEnv(env);
+    expect(config.remote?.user).toBe('ana');
+    expect(config.tailnet?.user).toBe('ana@example.com');
+    expect(Object.keys(env).sort()).toEqual(['HABBLAUD_REMOTE_ALLOW', 'HABBLAUD_REMOTE_INSECURE_HTTP', 'HOME', 'PATH']);
+  });
+});
+
+describe('/api/remote/confirm (senha de novo)', () => {
+  it('sem login 401; logado: GET diz se está em dia, senha errada 401, certa 200, outro método 405', async () => {
+    const s = await start();
+    expect((await request(s.remoteBase, '/api/remote/confirm')).status).toBe(401);
+    expect((await request(s.remoteBase, '/api/remote/confirm', { method: 'POST', body: { password: PASSWORD } })).status).toBe(401);
+    const cookie = await login(s.remoteBase);
+    const fresh = await request(s.remoteBase, '/api/remote/confirm', { headers: { Cookie: cookie } });
+    expect(fresh.status).toBe(200);
+    expect(JSON.parse(fresh.body)).toEqual({ fresh: true });
+    const wrong = await request(s.remoteBase, '/api/remote/confirm', { method: 'POST', body: { password: 'errada' }, headers: { Cookie: cookie } });
+    expect(wrong.status).toBe(401);
+    expect(JSON.parse(wrong.body).error).toBe('Senha incorreta.');
+    const ok = await request(s.remoteBase, '/api/remote/confirm', { method: 'POST', body: { password: PASSWORD }, headers: { Cookie: cookie } });
+    expect(ok.status).toBe(200);
+    expect((await request(s.remoteBase, '/api/remote/confirm', { method: 'PUT', body: {}, headers: { Cookie: cookie } })).status).toBe(405);
   });
 });

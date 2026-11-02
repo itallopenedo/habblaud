@@ -5,45 +5,25 @@
 //   POST /api/pty/:id/input|resize|close
 //   POST /api/agents/:id/stop          encerra o agente (aqui ou noutro terminal)
 //   POST /api/agents/:id/takeover      assume a sessão: encerra lá e retoma aqui
-// Quem controla um terminal destes executa comandos na máquina: só conexões do próprio computador, com Host
-// local e (quando o navegador manda) Origin da mesma origem. A borda (http/guard.ts) já exige JSON nos POST.
+// Quem controla um terminal destes executa comandos na máquina: só conexões do próprio computador (o tailscale serve
+// também conecta pelo loopback), com Host local — ou o nome da tailnet, na porta da tailnet — e (quando o navegador
+// manda) Origin da mesma origem. A borda (http/guard.ts) já exige JSON nos POST.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { PtyError, type PtyManager } from '../pty/manager';
-import { HttpError, readJson, sendJson } from './app';
-import { isLoopbackHost } from './guard';
+import { HttpError, ptyRequestProblem, readJson, sendJson } from './app';
 import { tr } from '../../shared/i18n';
 
 /** /api/agents/:id/(stop|takeover) (ids nunca contêm '/'). */
 const AGENT_ACTION_ROUTE = /^\/api\/agents\/([^/]+)\/(stop|takeover)$/;
 
-function isLoopbackAddress(addr: string | undefined): boolean {
-  if (!addr) return false;
-  const a = addr.startsWith('::ffff:') ? addr.slice(7) : addr;
-  return a === '::1' || a.startsWith('127.');
-}
-
-/** Motivo da recusa, ou null. */
-export function ptyRequestProblem(req: IncomingMessage): string | null {
-  if (!isLoopbackAddress(req.socket.remoteAddress)) return tr('o terminal interativo só pode ser usado no próprio computador');
-  const host = req.headers.host;
-  if (!isLoopbackHost(host)) return tr('abra o Habblaud por http://localhost para usar o terminal interativo');
-  const origin = req.headers.origin;
-  if (typeof origin === 'string') {
-    let same = false;
-    try {
-      same = new URL(origin).host.toLowerCase() === String(host).trim().toLowerCase();
-    } catch {
-      same = false;
-    }
-    if (!same) return tr('origem não permitida para o terminal interativo');
-  }
-  // Navegadores marcam pedidos de outro site (ou de outra porta do localhost = "same-site").
-  const site = req.headers['sec-fetch-site'];
-  if (site === 'cross-site' || site === 'same-site') return tr('origem não permitida para o terminal interativo');
-  return null;
-}
-
-export function createPtyRoutes(ptys: PtyManager): (req: IncomingMessage, res: ServerResponse, path: string) => void {
+/**
+ * `tailnet`: a requisição veio pela porta da tailnet. `claim`: o terminal que uma requisição da tailnet abriu, assumiu
+ * ou ligou (o app já exigiu a senha recente para isso) passa a ser desta sessão.
+ */
+export function createPtyRoutes(
+  ptys: PtyManager,
+  opts: { tailnet?: (req: IncomingMessage) => boolean; claim?: (req: IncomingMessage, ptyId: string) => void } = {},
+): (req: IncomingMessage, res: ServerResponse, path: string) => void {
   const fail = (res: ServerResponse, err: unknown) => {
     if (res.headersSent) return void res.destroy();
     if (err instanceof HttpError || err instanceof PtyError) sendJson(res, err.status, { error: err.message });
@@ -66,8 +46,12 @@ export function createPtyRoutes(ptys: PtyManager): (req: IncomingMessage, res: S
   };
 
   const handle = async (req: IncomingMessage, res: ServerResponse, path: string) => {
-    const problem = ptyRequestProblem(req);
+    const tailnet = !!opts.tailnet?.(req);
+    const problem = ptyRequestProblem(req, tailnet);
     if (problem) throw new HttpError(403, problem);
+    const claim = (id: string) => {
+      if (tailnet) opts.claim?.(req, id);
+    };
     const method = req.method ?? 'GET';
     const action = AGENT_ACTION_ROUTE.exec(path);
     if (action) {
@@ -78,19 +62,30 @@ export function createPtyRoutes(ptys: PtyManager): (req: IncomingMessage, res: S
         await ptys.stop(id);
         return noContent(res);
       }
-      return sendJson(res, 201, await ptys.takeover(id, { cols: body?.cols, rows: body?.rows }));
+      const info = await ptys.takeover(id, { cols: body?.cols, rows: body?.rows });
+      claim(info.id);
+      return sendJson(res, 201, info);
     }
-    const [rawId, act] = path.slice('/api/pty'.length).split('/').filter(Boolean);
+    // Rota estrita: /api/pty ou /api/pty/:id/:ação, sem segmento vazio nem a mais (barra no fim, '//').
+    const rest = path.slice('/api/pty'.length);
+    const parts = rest ? rest.slice(1).split('/') : [];
+    if ((rest && rest[0] !== '/') || parts.some((p) => !p) || parts.length === 1 || parts.length > 2) {
+      throw new HttpError(404, tr('rota desconhecida'));
+    }
+    const [rawId, act] = parts;
     if (!rawId) {
       if (method === 'GET') return sendJson(res, 200, { status: ptys.status(), ptys: ptys.list() });
       if (method !== 'POST') return notAllowed(res, 'GET, POST');
       const body = (await readJson(req)) as Record<string, unknown>;
-      return sendJson(res, 201, ptys.create({ cwd: body?.cwd, account: body?.account, cols: body?.cols, rows: body?.rows }));
+      const info = ptys.create({ cwd: body?.cwd, account: body?.account, cols: body?.cols, rows: body?.rows });
+      claim(info.id);
+      return sendJson(res, 201, info);
     }
     const id = decode(rawId);
     if (act === 'stream') {
       if (method !== 'GET') return notAllowed(res, 'GET');
-      return ptys.attach(id, req, res);
+      ptys.attach(id, req, res);
+      return claim(id);
     }
     if (method !== 'POST') return notAllowed(res, 'POST');
     const body = (await readJson(req)) as Record<string, unknown>;

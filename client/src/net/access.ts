@@ -41,6 +41,11 @@ export function access(): AccessInfo {
   return current ?? fallbackAccess(typeof location === 'undefined' ? '' : location.hostname);
 }
 
+/** Pode usar o terminal interativo nesta página? O servidor diz (`pty`); servidor antigo: só a página local. */
+export function canUsePty(a: AccessInfo = access()): boolean {
+  return a.pty ?? a.local;
+}
+
 export async function loadAccess(fetchImpl: typeof fetch = fetch, go: (url: string) => void = (u) => location.assign(u)): Promise<AccessInfo> {
   try {
     const res = await fetchImpl('/api/access', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(ACCESS_TIMEOUT_MS) });

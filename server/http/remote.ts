@@ -8,8 +8,9 @@
 // Configuração (escrita por `npm run remote:setup`, scripts/remote-setup.ts):
 //   HABBLAUD_REMOTE_USER + HABBLAUD_REMOTE_PASSWORD_HASH  ligam a porta (o hash é scrypt, ver remote/password.ts;
 //                                                         senha em texto puro não é aceita)
-//   HABBLAUD_REMOTE_ALLOW   o que a sessão remota pode fazer além de ver: permissions, messages, terminal ("none" = só
-//                           ver). Padrão: permissions.
+//   HABBLAUD_REMOTE_ALLOW   o que a sessão remota pode fazer além de ver: permissions, messages, terminal, spawn, pty
+//                           (o terminal interativo, só pela porta da tailnet: http/tailnet.ts) ("none" = só ver).
+//                           Padrão: permissions.
 //   HABBLAUD_REMOTE_TLS_DIR pasta com server.key, server.crt (e ca.crt, servido em /remote/ca.crt). Padrão:
 //                           /remote-tls no Docker, ~/.habblaud/remote-tls/server no Node. Sem certificado a porta não
 //                           sobe, a menos que HABBLAUD_REMOTE_INSECURE_HTTP=1 (HTTP puro: senha e cookie à vista na rede).
@@ -29,9 +30,9 @@ import { parsePasswordHash, verifyPassword, type PasswordHash } from '../remote/
 import { hostAllowed } from './guard';
 import { getLocale, tr } from '../../shared/i18n';
 
-export type RemoteFeature = 'permissions' | 'messages' | 'terminal' | 'spawn';
+export type RemoteFeature = 'permissions' | 'messages' | 'terminal' | 'spawn' | 'pty';
 
-const FEATURES: readonly RemoteFeature[] = ['permissions', 'messages', 'terminal', 'spawn'];
+const FEATURES: readonly RemoteFeature[] = ['permissions', 'messages', 'terminal', 'spawn', 'pty'];
 
 export interface RemoteTls {
   dir: string;
@@ -55,6 +56,10 @@ export interface RemoteConfig {
 export const DEFAULT_REMOTE_PORT = 4748;
 export const COOKIE = 'habblaud_remote';
 export const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
+/** Abrir, assumir ou encerrar um terminal interativo pelo celular pede a senha conferida há menos disto. */
+export const CONFIRM_MS = 10 * 60 * 1000;
+/** Teclas, tamanho e fechar sem a senha de novo valem num terminal da sessão por no máximo isto depois de registrado. */
+export const OWN_MS = 12 * 60 * 60 * 1000;
 /** Prazo para o primeiro byte de uma conexão na porta remota (antes de saber se é HTTPS). */
 const FIRST_BYTE_MS = 15_000;
 
@@ -131,6 +136,14 @@ export class RemoteSessions {
   private readonly key: Buffer;
   /** Assinatura -> validade dos tokens encerrados por "Sair" antes de vencer (o cookie apagado não basta: uma cópia valeria até expirar). */
   private readonly revoked = new Map<string, number>();
+  /** Assinatura -> quando a senha foi conferida pela última vez com este token (login ou /api/remote/confirm). Só em memória. */
+  private readonly confirmed = new Map<string, number>();
+  /**
+   * Assinatura -> terminais interativos que este token abriu, assumiu ou ligou com a senha recente (id -> até quando):
+   * neles, teclas, tamanho e fechar não pedem a senha de novo, por até OWN_MS (nunca além do token). Só em memória;
+   * "Sair" apaga.
+   */
+  private readonly owned = new Map<string, Map<string, number>>();
 
   constructor(
     secret: Buffer,
@@ -150,7 +163,60 @@ export class RemoteSessions {
   issue(): { token: string; maxAgeS: number } {
     const exp = this.now() + SESSION_MS;
     const payload = `v1.${exp}`;
-    return { token: `${payload}.${this.sign(payload)}`, maxAgeS: Math.floor(SESSION_MS / 1000) };
+    const sig = this.sign(payload);
+    this.markConfirmed(sig);
+    return { token: `${payload}.${sig}`, maxAgeS: Math.floor(SESSION_MS / 1000) };
+  }
+
+  /** A senha acabou de ser conferida de novo com este token (válido e não encerrado). */
+  confirm(token: string | undefined): boolean {
+    const parsed = this.parse(token);
+    if (!parsed || this.revoked.has(parsed.sig)) return false;
+    this.markConfirmed(parsed.sig);
+    return true;
+  }
+
+  /** A última conferência da senha com este token foi há menos de `ms`. */
+  confirmedWithin(token: string | undefined, ms: number): boolean {
+    const parsed = this.parse(token);
+    if (!parsed || this.revoked.has(parsed.sig)) return false;
+    const at = this.confirmed.get(parsed.sig);
+    if (at === undefined) return false;
+    // Relógio que voltou para trás: falha fechado.
+    const d = this.now() - at;
+    return d >= 0 && d < ms;
+  }
+
+  /** Registra o terminal `ptyId` neste token, só com a senha conferida há pouco. */
+  claim(token: string | undefined, ptyId: string): boolean {
+    const parsed = this.parse(token);
+    if (!parsed || this.revoked.has(parsed.sig) || !this.confirmedWithin(token, CONFIRM_MS)) return false;
+    const now = this.now();
+    for (const [sig, ids] of this.owned) {
+      for (const [id, exp] of ids) if (exp <= now) ids.delete(id);
+      if (!ids.size) this.owned.delete(sig);
+    }
+    const ids = this.owned.get(parsed.sig) ?? new Map<string, number>();
+    ids.delete(ptyId);
+    ids.set(ptyId, Math.min(parsed.exp, now + OWN_MS));
+    // ponytail: teto simples por token (os mais antigos saem primeiro); terminais já fechados ficam até vencer.
+    if (ids.size > 64) ids.delete(ids.keys().next().value!);
+    this.owned.set(parsed.sig, ids);
+    return true;
+  }
+
+  /** O terminal `ptyId` foi aberto, assumido ou ligado por este token com a senha recente. */
+  owns(token: string | undefined, ptyId: string): boolean {
+    const parsed = this.parse(token);
+    if (!parsed || this.revoked.has(parsed.sig)) return false;
+    const exp = this.owned.get(parsed.sig)?.get(ptyId);
+    return exp !== undefined && this.now() < exp;
+  }
+
+  private markConfirmed(sig: string): void {
+    const now = this.now();
+    for (const [s, at] of this.confirmed) if (now - at >= CONFIRM_MS) this.confirmed.delete(s);
+    this.confirmed.set(sig, now);
   }
 
   verify(token: string | undefined): boolean {
@@ -165,6 +231,8 @@ export class RemoteSessions {
     const now = this.now();
     for (const [sig, exp] of this.revoked) if (exp <= now) this.revoked.delete(sig);
     this.revoked.set(parsed.sig, parsed.exp);
+    this.owned.delete(parsed.sig);
+    this.confirmed.delete(parsed.sig);
     this.saveRevoked();
   }
 
@@ -465,6 +533,60 @@ export function createRemoteGate(deps: RemoteGateDeps): (req: IncomingMessage, r
         deps.sessions.revoke(readCookie(req.headers.cookie, COOKIE));
         sendJson(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader('', 0, deps.secure) });
       }
+      return true;
+    }
+
+    if (path === '/api/remote/confirm') {
+      // Senha de novo (terminal interativo pelo celular): só com login; mesmo freio do login.
+      const token = readCookie(req.headers.cookie, COOKIE);
+      if (!authed) {
+        req.resume();
+        sendJson(res, 401, { error: tr('faça login: abra o Habblaud por esta porta no navegador e entre com usuário e senha') });
+        return true;
+      }
+      if (method === 'GET' || method === 'HEAD') {
+        req.resume();
+        sendJson(res, 200, { fresh: deps.sessions.confirmedWithin(token, CONFIRM_MS) });
+        return true;
+      }
+      if (method !== 'POST') {
+        req.resume();
+        sendJson(res, 405, { error: tr('método não permitido') }, { Allow: 'GET, POST' });
+        return true;
+      }
+      const tooMany = () => {
+        const wait = Math.max(1, throttle.retryAfter());
+        sendJson(res, 429, { error: tr('Muitas tentativas. Tente de novo em {0} s.', [wait]) }, { 'Retry-After': String(wait) });
+      };
+      if (throttle.retryAfter() > 0) {
+        req.resume();
+        tooMany();
+        return true;
+      }
+      let begun = false;
+      let ok = false;
+      readBody(req)
+        .then(async (raw) => {
+          if (!throttle.begin()) return tooMany();
+          begun = true;
+          let body: { password?: unknown } = {};
+          try {
+            body = JSON.parse(raw) as typeof body;
+          } catch {
+            // corpo inválido: senha vazia, recusada abaixo
+          }
+          const password = typeof body.password === 'string' ? body.password : '';
+          if (!(await verify(password, deps.config.passwordHash))) return sendJson(res, 401, { error: tr('Senha incorreta.') });
+          ok = deps.sessions.confirm(token);
+          if (ok) sendJson(res, 200, { ok: true });
+          else sendJson(res, 401, { error: tr('sessão encerrada: entre de novo') });
+        })
+        .catch(() => {
+          if (!res.headersSent) sendJson(res, 400, { error: tr('requisição inválida') });
+        })
+        .finally(() => {
+          if (begun) throttle.end(ok);
+        });
       return true;
     }
 

@@ -409,6 +409,11 @@ export interface AccessInfo {
   /** Pode abrir agentes novos no app do Claude (POST /api/spawn). */
   spawn: boolean;
   /**
+   * Pode usar o terminal interativo: na porta local com Host local, ou pela porta da tailnet com `pty` liberado (nunca
+   * pela porta do celular na rede). Ausente em servidores antigos.
+   */
+  pty?: boolean;
+  /**
    * Pode usar a conta do Habblaud World (/api/world/*): recurso ligado (HABBLAUD_WORLD), trava do terminal e porta local
    * com Host local. Ausente em servidores antigos.
    */

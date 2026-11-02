@@ -6,10 +6,11 @@ import http from 'node:http';
 import { join } from 'node:path';
 import { codexDirsRefused, isDefaultDir } from './accounts/detect';
 import { AccountsService } from './accounts/service';
-import { isTruthy, loadConfig, messagesOffReason, terminalOffReason, worldSocketUrl } from './config';
+import { isTruthy, loadConfig, messagesOffReason, scrubSecretsFromEnv, terminalOffReason, worldSocketUrl } from './config';
 import { createApiHandler, sendJson } from './http/app';
 import { createRequestGuard, isLoopbackHost } from './http/guard';
-import { createRemoteGate, isRemoteRequest, loadSecret, RemoteSessions, startRemoteListener, type RemoteListener } from './http/remote';
+import { CONFIRM_MS, COOKIE, createRemoteGate, isRemoteRequest, loadSecret, LoginThrottle, readCookie, RemoteSessions, startRemoteListener, type RemoteListener } from './http/remote';
+import { createTailnetGate, createTailnetRemoteGate, isTailnetRequest, startTailnetListener } from './http/tailnet';
 import { Hub } from './http/sse';
 import { createStaticHandler } from './http/static';
 import { TerminalStreams } from './http/terminal';
@@ -52,6 +53,7 @@ import { createWhisperTranscriber, findWhisper } from './dictation/whisper';
 import { DeliveryIndex } from './deliveries/deliveries';
 import { AgentFiles } from './deliveries/agent-files';
 import { FileFetcher } from './deliveries/fetcher';
+import { insideKnownFolder, tempRoots } from './deliveries/files';
 import { WorldClient } from './world/client';
 import { createWorldRoutes } from './world/http';
 import { WorldService } from './world/service';
@@ -62,6 +64,8 @@ import { BuildingUplink } from './world/uplink';
 import { WorldViewer } from './world/viewer';
 
 const config = loadConfig();
+// Senha (hash) e usuários do acesso remoto ficam só no `config`: nenhum filho (PTY, Novo agente, codex) os herda.
+scrubSecretsFromEnv();
 const startedAt = Date.now();
 
 // Nome antigo (CodeTown, até a 0.3.2): leva ~/.codetown para ~/.habblaud antes de ler qualquer estado e avisa
@@ -214,9 +218,13 @@ const deliveries = history
       agentName: (id) => office.list().find((a) => a.id === id)?.name,
     })
   : undefined;
+// Pastas que o leitor do modo Node pode abrir: as de projeto que alguma conta do Claude Code conhece, as temporárias e
+// os anexos (a mesma regra do auxiliar do host no Docker, scripts/codex-bridge.ts).
+const fileRoots = [...tempRoots(), attachmentsRoot()];
 const deliveryFiles = deliveries
   ? new FileFetcher({
       direct: !config.inDocker,
+      inside: config.inDocker ? undefined : (p) => insideKnownFolder(p, { accountDirs: config.claudeDirs, roots: fileRoots }),
       mapHostPath: (p) => {
         for (const e of accounts.entries()) {
           const host = e.detected.configDir.replace(/\/+$/, '');
@@ -357,6 +365,13 @@ const ticker = setInterval(() => {
   }
 }, 250);
 
+// Sessões: as mesmas na porta do celular (4748) e na da tailnet (4749); o login numa vale na outra (cookies não separam
+// portas). O freio do login é um por porta (createTailnetRemoteGate): senhas erradas na rede local não travam o celular
+// pela tailnet, que só o usuário do Tailscale alcança.
+const remoteSessions = config.remote
+  ? new RemoteSessions(loadSecret(join(config.dataDir, 'remote-secret')), config.remote, Date.now, join(config.dataDir, 'remote-revoked.json'))
+  : undefined;
+
 const api = createApiHandler({
   renameRoom: (id, name) => {
     const path = office.roomPath(id);
@@ -377,7 +392,9 @@ const api = createApiHandler({
   timeline: createTimelineHandler({ dir: timelineDir, recording: !!timeline }),
   permissions: permissions ? createPermissionRoutes(permissions) : undefined,
   messages: messages ? createMessageRoutes(messages) : undefined,
-  pty: ptys ? createPtyRoutes(ptys) : undefined,
+  pty: ptys
+    ? createPtyRoutes(ptys, { tailnet: isTailnetRequest, claim: (req, id) => void remoteSessions?.claim(readCookie(req.headers.cookie, COOKIE), id) })
+    : undefined,
   spawn,
   attachments,
   attachmentWriter,
@@ -395,7 +412,15 @@ const api = createApiHandler({
   codexLive,
   stats,
   updates,
-  remote: config.remote ? { is: isRemoteRequest, allows: (f) => config.remote!.allow.has(f) } : undefined,
+  remote: config.remote
+    ? {
+        is: isRemoteRequest,
+        allows: (f) => config.remote!.allow.has(f),
+        tailnet: isTailnetRequest,
+        confirmed: (req) => !!remoteSessions?.confirmedWithin(readCookie(req.headers.cookie, COOKIE), CONFIRM_MS),
+        owns: (req, id) => !!remoteSessions?.owns(readCookie(req.headers.cookie, COOKIE), id),
+      }
+    : undefined,
   world: world ? createWorldRoutes(world, worldViewer, worldSocial) : undefined,
 });
 
@@ -457,9 +482,10 @@ if (config.remote) {
   const remote = config.remote;
   const gate = createRemoteGate({
     config: remote,
-    sessions: new RemoteSessions(loadSecret(join(config.dataDir, 'remote-secret')), remote, Date.now, join(config.dataDir, 'remote-revoked.json')),
+    sessions: remoteSessions!,
     secure: !!remote.tls,
     caFile: remote.tls?.caFile,
+    throttle: new LoginThrottle(),
   });
   remoteListener = startRemoteListener(
     remote,
@@ -484,9 +510,45 @@ if (config.remote) {
     const scheme = remote.tls ? 'HTTPS' : tr('HTTP SEM criptografia (HABBLAUD_REMOTE_INSECURE_HTTP)');
     log.info(tr('   Acesso remoto: ligado na porta {0} ({1}), {2}, com login; libera: {3}.', [remote.port, where, scheme, allow]));
     if (remote.allow.has('spawn') && !spawn) log.warn(tr('   Acesso remoto: "spawn" liberado, mas o Novo agente está desligado (ligue com HABBLAUD_PTY=1).'));
+    if (remote.allow.has('pty') && !config.tailnet) log.warn(tr('   Acesso remoto: "pty" liberado, mas o terminal interativo só vale pela porta da tailnet (defina HABBLAUD_TAILNET_USER).'));
   });
 } else if (config.remoteWarning) {
   log.warn(`   ${config.remoteWarning}.`);
+}
+
+/**
+ * Porta da tailnet (http/tailnet.ts): só 127.0.0.1, publicada pelo `tailscale serve --https=8443`. Usuário do Tailscale
+ * conferido antes de tudo; depois o mesmo login da porta do celular, com cookie Secure (para o navegador é HTTPS).
+ */
+let tailnetServer: http.Server | undefined;
+if (config.tailnet && config.remote && remoteSessions) {
+  const tailnet = config.tailnet;
+  const remote = config.remote;
+  const tailnetGate = createTailnetGate(tailnet);
+  const gate = createTailnetRemoteGate(remote, remoteSessions);
+  tailnetServer = startTailnetListener(
+    tailnet.port,
+    (req, res) => {
+      const url = parseUrl(req);
+      try {
+        if (guard(req, res)) return;
+        if (tailnetGate(req, res)) return;
+        if (gate(req, res, url)) return;
+        if (!api(req, res, url)) fallback(req, res, url);
+      } catch (err) {
+        log.warn(tr('Erro ao responder (tailnet) {0} {1}: {2}', [req.method, url.pathname, errMsg(err)]));
+        if (!res.headersSent) sendJson(res, 500, { error: tr('erro interno') });
+        else res.destroy();
+      }
+    },
+    log,
+  );
+  tailnetServer.once('listening', () => {
+    const pty = !ptys ? tr('desligado ({0})', [ptyOff ?? tr('desligado')]) : remote.allow.has('pty') ? tr('liberado') : tr('não liberado (pty em HABBLAUD_REMOTE_ALLOW)');
+    log.info(tr('   Porta da tailnet: ligada em 127.0.0.1:{0}, com login e o usuário do Tailscale; terminal interativo: {1}.', [tailnet.port, pty]));
+  });
+} else if (config.tailnetWarning) {
+  log.warn(`   ${config.tailnetWarning}.`);
 }
 
 server.listen(config.port, config.host, () => {
@@ -582,6 +644,7 @@ function shutdown(signal: string): void {
   names.flush();
   void closeVite?.();
   remoteListener?.close();
+  tailnetServer?.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1_500).unref();
 }

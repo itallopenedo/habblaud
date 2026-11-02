@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { access, fallbackAccess, loadAccess, onAccessChange, remoteLogout, setAccess } from './access';
+import { access, canUsePty, fallbackAccess, loadAccess, onAccessChange, remoteLogout, setAccess } from './access';
 
 afterEach(() => setAccess(null));
 
@@ -55,5 +55,12 @@ describe('access', () => {
     const down = (() => Promise.reject(new Error('rede'))) as unknown as typeof fetch;
     expect(await remoteLogout(down, (u) => went.push(u))).toBe(false);
     expect(went).toEqual(['/login']);
+  });
+
+  it('terminal interativo: vale o pty do servidor; servidor antigo (sem pty): só a página local', () => {
+    expect(canUsePty({ remote: true, local: false, permissions: true, messages: true, terminal: true, spawn: false, pty: true })).toBe(true);
+    expect(canUsePty({ remote: true, local: false, permissions: true, messages: true, terminal: true, spawn: false, pty: false })).toBe(false);
+    expect(canUsePty(fallbackAccess('localhost'))).toBe(true);
+    expect(canUsePty(fallbackAccess('192.168.1.10'))).toBe(false);
   });
 });
