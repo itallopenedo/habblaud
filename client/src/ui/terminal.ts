@@ -16,6 +16,7 @@ import { calendarDayDiff, formatClock, formatDateTime, formatDuration, formatEla
 import { ICONS } from './icons';
 import { maximizeButton, Movable } from './movable';
 import { access } from '../net/access';
+import { PermissionCard } from './permission';
 import type { PtyControl } from './pty';
 import { TermActions } from './termactions';
 import { TermTabs } from './termtabs';
@@ -713,6 +714,8 @@ export class TerminalPanel implements UiComponent, TerminalControl {
   private movable: Movable;
   /** Caixa de mensagem do rodapé (só a sessão ao vivo de um agente principal). */
   private composer: MessageComposer;
+  /** Pedido de permissão ou pergunta pendente com os botões, como na gaveta (no celular o terminal a cobre). */
+  private perm: PermissionCard;
 
   constructor(
     private ctx: UiContext,
@@ -804,6 +807,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.status = h('p', { class: 'ui-term__status' }, this.glyph, this.statusText, this.statusTime);
     // Esc na caixa devolve o foco à conversa (o próximo fecha o terminal).
     this.composer = new MessageComposer(ctx, 'terminal', { onEscape: () => this.focusLog() });
+    this.perm = new PermissionCard(ctx);
 
     this.imageImg = h('img', { class: 'ui-deliv-viewer__img', attrs: { alt: tr('Imagem da conversa') } });
     this.imageView = h(
@@ -827,7 +831,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
       this.tabs.el,
       tools,
       h('div', { class: 'ui-term__body' }, this.alertEl, this.scroll, this.newBtn),
-      h('div', { class: 'ui-term__foot' }, this.status, this.composer.el),
+      h('div', { class: 'ui-term__foot' }, this.perm.el, this.status, this.composer.el),
       this.imageView,
     );
     this.el.addEventListener('keydown', (e) => this.onKey(e));
@@ -898,6 +902,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.renderState();
     // Mensagens só para a sessão ao vivo (no histórico, a caixa diz que a sessão foi encerrada).
     this.composer.render(this.session ? undefined : this.ctx.agent(this.id), this.id);
+    this.perm.render(live ?? undefined);
   }
 
   /** Abre o painel numa conversa nova (agente ou sessão do histórico); a mesma conversa só recebe o foco. */
