@@ -3344,4 +3344,8 @@ export const FR: Readonly<Record<string, string>> = {
   "O serviço nativo (LaunchAgent) só existe no macOS; nos outros sistemas use npm start ou npm run docker:up.": "Le service natif (LaunchAgent) n'existe que sur macOS ; sur les autres systèmes, utilisez npm start ou npm run docker:up.",
   "Senha incorreta.": "Mot de passe incorrect.",
   "sessão encerrada: entre de novo": "session terminée : reconnectez-vous",
+  "porta da tailnet desligada: indisponível no Docker (rode com npm start)": "port du tailnet désactivé : indisponible dans Docker (lancez avec npm start)",
+  "porta da tailnet desligada: precisa do acesso remoto com login (npm run remote:setup)": "port du tailnet désactivé : il faut l'accès à distance avec connexion (npm run remote:setup)",
+  "Só pela tailnet, com o usuário liberado em HABBLAUD_TAILNET_USER.": "Uniquement via le tailnet, avec l'utilisateur autorisé dans HABBLAUD_TAILNET_USER.",
+  "Porta da tailnet: não deu para escutar em {0}:{1} ({2}).": "Port du tailnet : impossible d'écouter sur {0}:{1} ({2}).",
 };

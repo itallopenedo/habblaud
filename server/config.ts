@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { discoverClaudeDirs } from './accounts/detect';
 import { parseAllowedHosts } from './http/guard';
 import { parseRemoteConfig, type RemoteConfig } from './http/remote';
+import { parseTailnetConfig, type TailnetConfig } from './http/tailnet';
 import { parseGithubRepo } from './updates/checker';
 import { tr } from '../shared/i18n';
 
@@ -56,6 +57,10 @@ export interface ServerConfig {
   remote?: RemoteConfig;
   /** Por que o acesso remoto ficou desligado quando as variáveis estão incompletas. */
   remoteWarning?: string;
+  /** Terceira porta, só pela tailnet, para o terminal interativo no celular (http/tailnet.ts); ausente = desligada. */
+  tailnet?: TailnetConfig;
+  /** Por que a porta da tailnet ficou desligada com HABBLAUD_TAILNET_USER definido. */
+  tailnetWarning?: string;
   /** Habblaud World (server/world/): conta, personagem e, nas próximas fases, o prédio no mundo. */
   world: WorldConfig;
 }
@@ -230,6 +235,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, argv: string[] 
   const host = env.HABBLAUD_HOST?.trim() || '127.0.0.1';
   const pkg = readPackage(rootDir);
   const remote = parseRemoteConfig(env, inDocker);
+  const tailnet = parseTailnetConfig(env, inDocker, !!remote.config);
   return {
     port: Number.isFinite(port) && port > 0 && port < 65536 ? port : 4747,
     host,
@@ -251,6 +257,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, argv: string[] 
     codex: !env.HABBLAUD_CODEX?.trim() || isTruthy(env.HABBLAUD_CODEX),
     remote: remote.config,
     remoteWarning: remote.warning,
+    tailnet: tailnet.config,
+    tailnetWarning: tailnet.warning,
     world: parseWorldConfig(env, argv),
   };
 }
