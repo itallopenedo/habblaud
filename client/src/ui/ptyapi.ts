@@ -29,9 +29,17 @@ export async function postPty<T = unknown>(url: string, body: unknown): Promise<
 
 const SIZE = { cols: 120, rows: 32 };
 
-/** Sessão nova do Claude Code na pasta (e conta) indicada. */
-export function createPty(cwd: string, account?: string): Promise<PtyInfo | undefined> {
-  return postPty<PtyInfo>('/api/pty', { cwd, account, ...SIZE });
+/** Sessão nova do Codex (Novo agente): escolhas conferidas no servidor (ausente = padrão do Codex). */
+export interface CodexLaunch {
+  model?: string;
+  effort?: string;
+  permission?: string;
+  prompt?: string;
+}
+
+/** Sessão nova do Claude Code (ou do Codex, com `codex`) na pasta (e conta) indicada. */
+export function createPty(cwd: string, account?: string, codex?: CodexLaunch): Promise<PtyInfo | undefined> {
+  return postPty<PtyInfo>('/api/pty', { cwd, account, ...SIZE, ...(codex ? { agent: 'codex', ...codex } : {}) });
 }
 
 /** Encerra a sessão noutro terminal e continua a mesma conversa aqui. */

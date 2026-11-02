@@ -43,6 +43,16 @@ do meio (0.**3**.0).
 
 ### Adicionado
 
+- **Novo agente com Claude ou Codex, modelo, esforço, permissões e conta.** A folha do Novo agente ganhou um seletor
+  Claude | Codex e as listas de conta (começa na padrão), modelo (pelo nome completo), esforço (só os níveis que o
+  modelo aceita) e modo de permissão. O Claude continua começando em segundo plano (`claude --bg`, agora com
+  `--model`, `--effort` e `--permission-mode`); o Codex abre num terminal interativo do Habblaud (`codex -C <pasta>`,
+  com `-m`, `-c model_reasoning_effort=...`, `-s` e `-a`), que se liga ao agente quando ele aparece no escritório, e
+  pode começar sem pedido. Os modelos do Codex vêm do `codex debug models`. As opções que tiram todas as travas ficam
+  de fora (use "Padrão" se a sua configuração já usa). Cada aparelho lembra a última escolha de cada agente. O cartão
+  do agente mostra o esforço ao lado do modelo (Codex: do rollout; Claude: das sessões que o Habblaud começou). Só no
+  modo Node (no Docker, a folha continua como antes); anexos só no Claude por enquanto. Pasta ainda não confiável
+  para o Claude Code continua abrindo no app, com o modelo e a conta padrão.
 - **Modo chat no terminal.** Um botão "Chat | Terminal" no topo da janela troca o visual da conversa: no chat, seus
   prompts viram bolhas, as respostas usam fonte de texto e as ferramentas entre duas mensagens ficam recolhidas em
   "Usou N ferramentas" (um toque abre). A escolha fica salva no aparelho; sem escolha, o chat é o padrão na tela

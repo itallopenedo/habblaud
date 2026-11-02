@@ -157,3 +157,21 @@ No celular:
 6. **Docker**: o auxiliar do host entra nesta fase ou fica só o modo Node, que é o do Mac? Recomendação: só o modo
    Node agora.
 7. **Codex sem pedido**: permitir abrir uma sessão vazia do Codex, como já dá para fazer com o Claude?
+
+## Decisões (Itallo, 2026-11-02)
+
+1. Codex pelo caminho A: interativo no terminal do Habblaud.
+2. Conta: a folha começa na conta padrão e deixa trocar.
+3. Modelos pelo nome completo (ex.: `claude-opus-5-5`, `gpt-6.1-sol`), com modelo e esforço nos dois agentes.
+4. Modo de permissão entra nesta fase. As opções que tiram todas as travas (`bypassPermissions` no Claude,
+   `danger-full-access` no Codex) ficam fora da folha: quem já usa isso na configuração do CLI escolhe "Padrão".
+5. O cartão do agente mostra modelo e esforço. Codex: o esforço vem do rollout (`turn_context`). Claude: o
+   transcript não grava o esforço, então o cartão mostra o esforço só das sessões que o Habblaud começou (pelo id
+   que o `claude --bg` devolve, que é o começo do id da sessão), enquanto o servidor estiver no ar.
+6. Só o Mac (modo Node). O auxiliar do host (Docker) continua sem as opções novas.
+7. O Codex pode começar sem pedido.
+
+Ligação entre o terminal do Codex e o agente do escritório: os hooks do Codex rodam no ambiente do daemon, então
+não dá para marcar a sessão por variável de ambiente. O servidor liga o terminal ao primeiro agente principal do
+Codex que aparece na mesma pasta e na mesma conta depois que o terminal abriu e que ainda não está ligado a outro
+terminal.

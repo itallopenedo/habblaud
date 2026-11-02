@@ -2,6 +2,10 @@
 // controla esse terminal (xterm.js). Saída via SSE em GET /api/pty/:id/stream; entrada, redimensionamento e
 // encerramento via POST (rotas em http/pty.ts).
 //
+// Codex: sessão nova do Codex interativo na pasta (`codex -C <pasta> ...`, com modelo, esforço e modo de permissão
+// já conferidos em http/pty.ts; spawn/options.ts monta os argumentos). O terminal se liga ao agente do Codex que
+// aparece depois na mesma pasta e conta (os hooks rodam no daemon do Codex: não há como marcar a sessão por variável).
+//
 // Três usos: sessão nova numa pasta; "assumir" uma sessão aberta noutro terminal (o processo de lá é
 // encerrado e a mesma conversa continua aqui com `claude --resume`); e encerrar um agente, esteja ele aqui
 // ou noutro terminal (só processos que o registro de sessões do Claude Code confirma como sessão e cujo início
@@ -21,6 +25,7 @@ import { readProcInfo, sameProcess, type ProcInfo, type RegisteredProc } from '.
 import { killWithConsoleReset } from './winkill';
 import { tr } from '../../shared/i18n';
 import { isExecutableFile } from '../claude-bin';
+import { codexArgs, type LaunchChoice } from '../spawn/options';
 
 export { claudeBinFrom, findExecutable, isExecutableFile } from '../claude-bin';
 
@@ -72,6 +77,15 @@ export interface PtyManagerOptions {
   disabledReason?: string;
   claudeBin: string;
   accounts: () => PtyAccount[];
+  /** Binário do Codex (ausente = sem Codex no terminal). */
+  codexBin?: string;
+  /** Contas do Codex (dir = CODEX_HOME). */
+  codexAccounts?: () => PtyAccount[];
+  /**
+   * Agente principal do Codex que apareceu na pasta e conta depois de `since` e ainda não está ligado a um terminal
+   * (`taken`): é a sessão que o terminal abriu.
+   */
+  findCodexAgent?: (p: { cwd: string; account: string; since: number; taken: ReadonlySet<string> }) => string | undefined;
   agent: (id: string) => PtyAgentRef | undefined;
   onChange: () => void;
   env?: NodeJS.ProcessEnv;
@@ -169,7 +183,20 @@ interface SpawnPlan {
   account: PtyAccount;
   cols: number;
   rows: number;
+  /** Sessão nova do Codex (escolhas já conferidas). */
+  codex?: CodexLaunch;
 }
+
+/** Codex no terminal: escolhas conferidas (http/pty.ts) e o pedido inicial. */
+export interface CodexLaunch {
+  choice: LaunchChoice;
+  prompt?: string;
+}
+
+/** Quanto tempo depois de abrir o terminal do Codex a sessão dele ainda pode aparecer no escritório. */
+const CODEX_LINK_MS = 5 * 60_000;
+/** Folga do relógio: o agente pode marcar o início um pouco antes do terminal. */
+const CODEX_LINK_SLACK_MS = 5_000;
 
 export class PtyError extends Error {
   constructor(
@@ -218,12 +245,28 @@ export class PtyManager {
     for (const [id, t] of this.ptys) {
       if (t.info.exitedAt !== undefined && now - t.info.exitedAt > EXITED_KEEP_MS) this.drop(id);
     }
+    this.linkCodex(now);
     return [...this.ptys.values()].map((t) => ({ ...t.info }));
   }
 
-  /** Abre uma sessão nova do Claude Code na pasta (`cwd` absoluto), na conta pedida (ou na padrão). */
-  create(p: { cwd: unknown; account?: unknown; cols?: unknown; rows?: unknown }): PtyInfo {
+  /** Abre uma sessão nova do Claude Code (ou do Codex, com `codex`) na pasta (`cwd` absoluto), na conta pedida (ou na padrão). */
+  create(p: { cwd: unknown; account?: unknown; cols?: unknown; rows?: unknown; codex?: CodexLaunch }): PtyInfo {
     return this.spawn(this.plan(p, this.takeovers.size));
+  }
+
+  /** Liga cada terminal do Codex ainda sem agente ao agente que apareceu na pasta dele. */
+  private linkCodex(now: number): void {
+    const find = this.opts.findCodexAgent;
+    if (!find) return;
+    const taken = new Set<string>();
+    for (const t of this.ptys.values()) if (t.info.agentId) taken.add(t.info.agentId);
+    for (const t of this.ptys.values()) {
+      if (t.info.agent !== 'codex' || t.info.agentId || t.info.exitedAt !== undefined || now - t.info.startedAt > CODEX_LINK_MS) continue;
+      const id = find({ cwd: t.info.cwd, account: t.info.account, since: t.info.startedAt - CODEX_LINK_SLACK_MS, taken });
+      if (!id) continue;
+      t.info.agentId = id;
+      taken.add(id);
+    }
   }
 
   /**
@@ -370,11 +413,13 @@ export class PtyManager {
   }
 
   /** Valida o pedido de uma sessão nova (`reserved`: vagas já prometidas a tomadas em andamento). */
-  private plan(p: { cwd: unknown; account?: unknown; cols?: unknown; rows?: unknown }, reserved = 0): SpawnPlan {
+  private plan(p: { cwd: unknown; account?: unknown; cols?: unknown; rows?: unknown; codex?: CodexLaunch }, reserved = 0): SpawnPlan {
     if (!this.opts.spawn) throw new PtyError(503, tr('terminal desligado: {0}', [this.opts.disabledReason ?? tr('indisponível')]));
     // Antes de tudo (o "assumir" encerra a sessão de lá depois daqui): um claude que não roda abriria um terminal que
     // sai na hora.
-    if (!isExecutableFile(this.opts.claudeBin)) throw new PtyError(503, tr('o executável do Claude Code não roda: {0} (confira o HABBLAUD_CLAUDE_BIN)', [this.opts.claudeBin]));
+    if (p.codex) {
+      if (!this.opts.codexBin || !isExecutableFile(this.opts.codexBin)) throw new PtyError(503, tr('o Codex não está instalado neste computador (ou confira o HABBLAUD_CODEX_BIN)'));
+    } else if (!isExecutableFile(this.opts.claudeBin)) throw new PtyError(503, tr('o executável do Claude Code não roda: {0} (confira o HABBLAUD_CLAUDE_BIN)', [this.opts.claudeBin]));
     if (typeof p.cwd !== 'string' || !isAbsolute(p.cwd)) throw new PtyError(400, tr('informe a pasta do projeto (caminho absoluto)'));
     const cwd = resolve(p.cwd);
     let isDir = false;
@@ -384,32 +429,35 @@ export class PtyManager {
       // tratado abaixo
     }
     if (!isDir) throw new PtyError(400, tr('pasta não encontrada: {0}', [cwd]));
-    const accounts = this.opts.accounts();
+    const accounts = p.codex ? (this.opts.codexAccounts?.() ?? []) : this.opts.accounts();
     const account = typeof p.account === 'string' ? accounts.find((a) => a.id === p.account) : (accounts.find((a) => a.isDefault) ?? accounts[0]);
     if (!account) throw new PtyError(400, tr('conta desconhecida'));
     const running = [...this.ptys.values()].filter((t) => t.info.exitedAt === undefined).length;
     if (running + Math.max(0, reserved) >= MAX_PTYS) throw new PtyError(429, tr('limite de {0} terminais abertos', [MAX_PTYS]));
-    return { cwd, account, cols: clampInt(p.cols, 20, 400, 100), rows: clampInt(p.rows, 5, 200, 30) };
+    return { cwd, account, cols: clampInt(p.cols, 20, 400, 100), rows: clampInt(p.rows, 5, 200, 30), ...(p.codex ? { codex: p.codex } : {}) };
   }
 
   private spawn(plan: SpawnPlan, p: { resume?: string; from?: string } = {}): PtyInfo {
     const spawn = this.opts.spawn;
     if (!spawn) throw new PtyError(503, tr('terminal desligado: {0}', [this.opts.disabledReason ?? tr('indisponível')]));
-    const { cwd, account, cols, rows } = plan;
+    const { cwd, account, cols, rows, codex } = plan;
     const env: NodeJS.ProcessEnv = { ...(this.opts.env ?? process.env), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
     for (const k of INHERITED_SESSION_VARS) delete env[k];
-    if (account.isDefault) delete env.CLAUDE_CONFIG_DIR;
-    else env.CLAUDE_CONFIG_DIR = account.dir;
+    const homeVar = codex ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR';
+    if (account.isDefault) delete env[homeVar];
+    else env[homeVar] = account.dir;
 
     let proc: PtyProcess;
     try {
-      const args = p.resume ? ['--resume', p.resume] : [];
-      proc = spawn(this.opts.claudeBin, args, { cwd, cols, rows, env });
+      if (codex) proc = spawn(this.opts.codexBin!, codexArgs(cwd, codex.choice, codex.prompt), { cwd, cols, rows, env });
+      else proc = spawn(this.opts.claudeBin, p.resume ? ['--resume', p.resume] : [], { cwd, cols, rows, env });
     } catch (err) {
-      throw new PtyError(500, tr('não consegui abrir o Claude Code: {0}', [errMsg(err)]));
+      throw new PtyError(500, codex ? tr('não consegui abrir o Codex: {0}', [errMsg(err)]) : tr('não consegui abrir o Claude Code: {0}', [errMsg(err)]));
     }
     const id = `p${++this.seq}-${proc.pid}`;
-    const info: PtyInfo = { id, pid: proc.pid, cwd, account: account.id, agentId: `${account.id}:${proc.pid}`, startedAt: this.now() };
+    // Codex: o agente só é conhecido quando a sessão aparece no escritório (linkCodex).
+    const info: PtyInfo = { id, pid: proc.pid, cwd, account: account.id, agentId: codex ? '' : `${account.id}:${proc.pid}`, startedAt: this.now() };
+    if (codex) info.agent = 'codex';
     if (p.resume) info.resumed = p.resume;
     if (p.from) info.fromAgent = p.from;
     const pty: Pty = { info, proc, screen: this.createScreen(cols, rows), clients: new Set(), pending: new Map() };
@@ -425,12 +473,19 @@ export class PtyManager {
       this.broadcast(pty, 'exit', { code: exitCode });
       this.opts.onChange();
     });
-    log.info(p.resume ? tr('Terminal {0} aberto em {1} (conta {2}, retomando {3}).', [id, cwd, account.id, p.resume]) : tr('Terminal {0} aberto em {1} (conta {2}).', [id, cwd, account.id]));
+    log.info(
+      p.resume
+        ? tr('Terminal {0} aberto em {1} (conta {2}, retomando {3}).', [id, cwd, account.id, p.resume])
+        : codex
+          ? tr('Terminal {0} do Codex aberto em {1} (conta {2}).', [id, cwd, account.id])
+          : tr('Terminal {0} aberto em {1} (conta {2}).', [id, cwd, account.id]),
+    );
     this.opts.onChange();
     return { ...info };
   }
 
   private byAgent(agentId: string): Pty | undefined {
+    if (!agentId) return undefined;
     for (const t of this.ptys.values()) if (t.info.agentId === agentId && t.info.exitedAt === undefined) return t;
     return undefined;
   }

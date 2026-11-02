@@ -404,6 +404,8 @@ export interface CodexState {
   /** Formato: o do session_meta; sem ele, deduzido (o primeiro item paginated ou evento legacy decide). */
   mode?: HistoryMode;
   model?: string;
+  /** Esforço do turno mais recente (turn_context). */
+  effort?: string;
   gitBranch?: string;
   /** Primeira instrução (título da sessão), já mascarada e cortada. */
   title?: string;
@@ -579,8 +581,11 @@ class RolloutLineParser {
         this.changed();
         return;
       }
-      case 'turn_context':
+      case 'turn_context': {
+        const settings = rec(rec(p.collaboration_mode)?.settings);
+        this.effort(p.effort ?? settings?.reasoning_effort);
         return this.model(p.model);
+      }
       case 'event_msg':
         return this.event(p);
       case 'response_item':
@@ -591,6 +596,13 @@ class RolloutLineParser {
       default:
         return;
     }
+  }
+
+  private effort(v: unknown): void {
+    const e = str(v);
+    if (!e || e === this.s.effort) return;
+    this.s.effort = e;
+    this.changed();
   }
 
   private model(v: unknown): void {

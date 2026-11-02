@@ -18,6 +18,7 @@ import {
   formatUSD,
   permissionLabel,
   plural,
+  effortLabel,
   prettyModel,
   relativeTime,
   shortPath,
@@ -762,7 +763,7 @@ class AgentView {
     setText(this.linesPlus, `+${formatInt(s.linesAdded ?? 0)}`);
     setText(this.linesMinus, `−${formatInt(s.linesRemoved ?? 0)}`);
     st.set('subs', a.kind === 'main' ? formatInt(s.subagents) : null);
-    st.set('model', prettyModel(a.model));
+    st.set('model', a.effort ? `${a.model ? prettyModel(a.model) : tr('Padrão')} · ${effortLabel(a.effort)}` : prettyModel(a.model));
     st.set('branch', a.gitBranch ?? null);
     // Codex: a política de aprovação (quando o servidor a manda) no lugar do modo de permissão do Claude Code.
     st.label('perm', codex ? tr('Aprovações') : tr('Permissões'));

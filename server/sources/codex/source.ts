@@ -723,6 +723,7 @@ export class CodexSource implements AgentSource, CodexLive {
     const summary: TranscriptSummary = { tasks: s.tasks, stats: { ...s.stats } };
     if (s.title) summary.title = s.title;
     if (s.model) summary.model = s.model;
+    if (s.effort) summary.effort = s.effort;
     const branch = s.gitBranch ?? t.meta?.gitBranch;
     if (branch) summary.gitBranch = branch;
     if (s.firstAt !== undefined) summary.firstAt = s.firstAt;

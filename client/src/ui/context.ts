@@ -3,6 +3,7 @@ import type { AccountInfo, AgentInfo } from '../../../shared/types';
 import type { OfficeStore } from '../net/store';
 import type { Selection, WorldApi } from '../world/api';
 import type { UiPrefs } from './prefs';
+import type { CodexLaunch } from './ptyapi';
 
 export interface UiComponent {
   /** Chamado no máximo uma vez por quadro, quando algo mudou (snapshot, seleção, relógio...). */
@@ -26,8 +27,8 @@ export interface TerminalRouter {
   readonly available: boolean;
   /** Terminal interativo ligado (abrir sessões novas, assumir, encerrar). */
   readonly interactiveEnabled: boolean;
-  /** Sessão nova do Claude Code na pasta, aberta no terminal interativo. */
-  newSession(cwd: string, account?: string): Promise<void>;
+  /** Sessão nova do Claude Code (ou do Codex) na pasta, aberta no terminal interativo; false = não abriu (senha não confirmada). */
+  newSession(cwd: string, account?: string, codex?: CodexLaunch): Promise<boolean>;
 }
 
 export type HelpSection = 'usage' | 'codex';
