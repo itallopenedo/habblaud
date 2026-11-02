@@ -3306,4 +3306,8 @@ export const ES: Readonly<Record<string, string>> = {
   "Imagem {0}": "Imagen {0}",
   "Ampliar a imagem {0}": "Ampliar la imagen {0}",
   "Imagem da conversa": "Imagen de la conversación",
+  "Arquivos": "Archivos",
+  "Ver arquivos": "Ver archivos",
+  "Atualizar": "Actualizar",
+  "Nenhum arquivo de ver (imagem, PDF, página, texto) escrito nesta sessão.": "Ningún archivo visible (imagen, PDF, página, texto) escrito en esta sesión.",
 };

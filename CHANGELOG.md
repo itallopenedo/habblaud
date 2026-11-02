@@ -41,6 +41,9 @@ do meio (0.**3**.0).
 - **Avisos de travado e de erro no iPhone:** o `scripts/phone-notify.mjs` também avisa quando um agente fica trabalhando
   sem novidade por mais de 15 min (`HABBLAUD_STUCK_MIN`; não conta comandos do Claude Code ainda rodando em segundo
   plano nem agentes esperando um subagente) e quando para com erro. Texto genérico, como o aviso de espera.
+- **Arquivos do agente na gaveta.** A seção "Arquivos" lista as imagens, PDFs, vídeos, páginas e textos que o agente
+  escreveu ou editou na sessão, do mais recente para o mais antigo, e abre cada um com um toque. Mesmos tipos e
+  bloqueios das entregas (nada de `.env`, chaves ou pastas de credenciais) e a mesma trava do terminal.
 
 ## [1.0.4] - 2026-10-27
 

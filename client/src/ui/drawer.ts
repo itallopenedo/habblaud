@@ -3,6 +3,7 @@
 import type { Activity, AgentInfo, FeedItem, RoomInfo, ShellJob, TaskItem } from '../../../shared/types';
 import { roomTheme } from '../art';
 import { createAvatarPlaceholder, updateAvatar } from './avatar';
+import { AgentFilesSection } from './agentfiles';
 import { CharacterEditor } from './character-editor';
 import { MessageComposer } from './composer';
 import type { UiComponent, UiContext } from './context';
@@ -249,6 +250,7 @@ class AgentView {
   private tasksBar: HTMLElement;
   private tasks: KeyedList<TaskItem>;
   private teamSec: ReturnType<typeof section>;
+  private readonly files: AgentFilesSection;
   private team: KeyedList<AgentInfo>;
   private teamEmpty: HTMLElement;
   private timeline: KeyedList<Activity>;
@@ -370,6 +372,7 @@ class AgentView {
     const teamList = h('div', { class: 'ui-team' });
     this.teamEmpty = h('p', { class: 'ui-muted ui-small', text: tr('Nenhum subagente no momento.') });
     this.teamSec = section(tr('Subagentes'), teamList, this.teamEmpty);
+    this.files = new AgentFilesSection(ctx);
     this.team = new KeyedList<AgentInfo>(teamList, {
       key: (a) => a.id,
       create: (a) => createAgentRow(a, (id) => ctx.select({ type: 'agent', id }, { focus: true }), 'sm'),
@@ -422,6 +425,7 @@ class AgentView {
       this.social.el,
       this.tasksSec.el,
       this.teamSec.el,
+      this.files.el,
       this.timelineSec.el,
       statsSec.el,
       this.codexHint,
@@ -621,6 +625,7 @@ class AgentView {
 
     // Mandar mensagem: só para principais presentes (com o recurso ligado e a página local; sem o plugin, a dica).
     setHidden(this.msgSec.el, this.composer.render(live, this.id) === 'off');
+    this.files.render(a);
 
     // Vida social (personalidade, carteira, rodas): só de quem está no escritório.
     if (live) this.social.render(a.id, now);
