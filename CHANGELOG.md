@@ -12,6 +12,9 @@ do meio (0.**3**.0).
 
 ### Corrigido
 
+- **Codex: pergunta que não trava o trabalho.** Depois de uma pergunta assíncrona (`request_user_input_async`), o
+  agente que segue trabalhando aparece como "trabalhando", não mais "precisa de você"; volta a esperar quando o Codex
+  para no `sleep` da espera. O rótulo da linha no leitor de tela não repete "Codex (Codex)".
 - **Terminal: o `spawn-helper` do node-pty é conferido a cada terminal novo.** Um `npm install` com o serviço no ar
   desfazia a permissão e quebrava todo terminal até reiniciar; agora ela volta sozinha (e uma falha vira aviso no log).
 - **Serviço nativo: idioma certo e falha visível ao reinstalar.** O LaunchAgent usa o `LANG` de quem instalou (ex.:

@@ -98,9 +98,13 @@ export function updateAgentRow(
   setAttr(row, 'aria-current', selected ? 'true' : null);
   // Para leitores de tela, o tempo em minutos (o cronômetro mudaria o rótulo a cada segundo).
   const doing = wait ? tr('{0}, há {1}', [shellLine(wait, now).label, formatDuration(now - wait.since)]) : agent.activity?.text;
+  const accountName = account?.name ?? agent.account;
+  // A conta do Codex costuma já se chamar "Codex": sem o "(Codex)" repetido.
+  const provider = agent.provider && agent.provider !== 'claude' ? PROVIDER_NAME[agent.provider] : '';
+  const via = provider && !accountName.toLowerCase().includes(provider.toLowerCase()) ? ` (${provider})` : '';
   setAttr(
     row,
     'aria-label',
-    `${agent.name}, ${agent.kind === 'main' ? tr('agente principal') : tr('subagente {0}', [agent.role])}, ${account?.name ?? agent.account}${agent.provider && agent.provider !== 'claude' ? ` (${PROVIDER_NAME[agent.provider]})` : ''}, ${statusLabel(status)}${doing ? `: ${doing}` : ''}`,
+    `${agent.name}, ${agent.kind === 'main' ? tr('agente principal') : tr('subagente {0}', [agent.role])}, ${accountName}${via}, ${statusLabel(status)}${doing ? `: ${doing}` : ''}`,
   );
 }

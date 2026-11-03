@@ -491,6 +491,35 @@ describe('fonte do Codex: eventos de hook', () => {
     expect(ctx.agent()?.status).toBe('working');
   });
 
+  it('pergunta assíncrona e o Codex segue trabalhando: working até ele voltar ao sleep da espera', () => {
+    const ctx = setup();
+    ctx.source.boot();
+    ctx.hook(ev('UserPromptSubmit', { prompt: 'me pergunte e siga' }));
+    const q = { questions: [{ title: 'Qual contrato?', options: ['A', 'B'] }] };
+    const path = ctx.home.rollout(T, [
+      R.meta(T, { at: ctx.now() - 5_000, cwd: '/projetos/api' }),
+      R.taskStarted('turn1', ctx.now() - 4_000),
+      R.functionCall('q1', 'request_user_input_async', q, ctx.now() - 3_000),
+      R.functionOutput('q1', '{"accepted":true}', ctx.now() - 2_000),
+    ]);
+    ctx.home.lock(T, ctx.now() - 5_000);
+    ctx.advance(3_100);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('waiting');
+    ctx.advance(1_000);
+    ctx.home.append(path, [R.functionCall('c1', 'exec_command', { cmd: 'go test ./...' }, ctx.now())]);
+    ctx.poll();
+    expect(ctx.agent()?.status).toBe('working');
+    // Hooks das ferramentas de trabalho não voltam ao waiting.
+    ctx.advance(500);
+    ctx.hook(ev('PreToolUse', { tool_name: 'Bash', tool_use_id: 'c2', tool_input: { command: 'ls' } }));
+    expect(ctx.agent()?.status).toBe('working');
+    ctx.advance(500);
+    ctx.home.append(path, [R.functionOutput('c1', 'ok', ctx.now()), R.functionCall('s1', 'sleep', {}, ctx.now())]);
+    ctx.poll();
+    expect(ctx.agent()).toMatchObject({ status: 'waiting', waitingFor: 'responder uma pergunta' });
+  });
+
   it('pergunta aberta sem sinal de vida por QUESTION_QUIET_MS deixa de contar como espera', () => {
     const ctx = setup();
     ctx.source.boot();
