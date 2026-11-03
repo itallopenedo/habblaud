@@ -702,6 +702,8 @@ export class CodexSource implements AgentSource, CodexLive {
     // `request_user_input` (síncrono, modo Plan) bloqueia sem saída, sleep nem hooks: pergunta ainda sem
     // function_call_output continua em `pending` e é uma espera viva, por mais quieto que esteja.
     if ([...t.state.questions].some((id) => t.state.pending.has(id))) return true;
+    // Pergunta assíncrona e o Codex seguiu trabalhando: não está esperando você (até o próximo `sleep`).
+    if (t.state.questionBusy) return false;
     return now - Math.max(t.lastWriteAt ?? 0, t.lastHookAt ?? 0, t.state.lastAt ?? 0) < QUESTION_QUIET_MS;
   }
 

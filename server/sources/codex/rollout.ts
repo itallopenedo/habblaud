@@ -419,6 +419,11 @@ export interface CodexState {
   pending: Map<string, string>;
   /** Perguntas ao usuário sem resposta (call_id). O resultado da chamada chega logo ({accepted}); a resposta é outra mensagem. */
   questions: Set<string>;
+  /**
+   * Com pergunta aberta, o Codex chamou uma ferramenta de trabalho (não o `sleep` da espera): ele segue trabalhando
+   * enquanto a resposta não vem (request_user_input_async). Pergunta nova ou `sleep` voltam a contar como espera.
+   */
+  questionBusy?: boolean;
   /** Uso do plano mais recente (rate_limits) e o plano. */
   usage?: AccountUsage;
   planType?: string;
@@ -688,6 +693,15 @@ class RolloutLineParser {
     this.out.signals.push({ type: 'progress' });
   }
 
+  /** Ferramenta chamada com pergunta aberta: `sleep` é a espera da resposta; o resto é trabalho. */
+  private questionWork(name: string): void {
+    if (!this.s.questions.size) return;
+    const busy = name !== 'sleep';
+    if (busy === !!this.s.questionBusy) return;
+    this.s.questionBusy = busy;
+    this.out.signals.push(busy ? { type: 'progress' } : { type: 'question', open: true });
+  }
+
   private tokens(p: Rec): void {
     const total = rec(rec(p.info)?.total_token_usage);
     if (total) {
@@ -909,8 +923,9 @@ class RolloutLineParser {
         }
         if (callId && QUESTION_TOOLS.has(name)) {
           this.s.questions.add(callId);
+          this.s.questionBusy = false;
           this.out.signals.push({ type: 'question', open: true });
-        }
+        } else this.questionWork(name);
         if (name === 'update_plan') {
           const tasks = planTasks(input);
           if (tasks) {
@@ -926,6 +941,7 @@ class RolloutLineParser {
       case 'local_shell_call': {
         const callId = str(p.call_id) ?? str(p.id);
         if (callId) this.s.pending.set(callId, 'local_shell');
+        this.questionWork('local_shell');
         if (this.s.mode === 'legacy') {
           this.s.stats.toolCalls++;
           this.changed();
